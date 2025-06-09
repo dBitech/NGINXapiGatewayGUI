@@ -22,6 +22,9 @@ A web-based GUI for managing nginx configurations with a focus on API gateway fu
 - **Authentication**: Basic auth, JWT, and API key authentication options
 - **Regex Pattern Matching**: Advanced location matching using regular expressions with nginx modifiers
 - **URL Rewriting**: Multiple rewrite rules per route with capture groups and various flags
+- **OpenAPI Aggregation**: Dynamic Swagger/OpenAPI specification aggregation from backend services
+- **Unified API Documentation**: Centralized Swagger UI displaying all backend APIs in one interface
+- **API Discovery**: Automatic detection and aggregation of OpenAPI specifications from multiple endpoints
 
 ### Template System
 - **External Jinja2 Templates**: Use external Jinja2 templates instead of hardcoded configurations
@@ -257,6 +260,74 @@ Use the "Configuration" section to:
 - Test configuration syntax
 - Reload nginx with new settings
 
+### 5. OpenAPI Integration
+
+Use the "OpenAPI" section to:
+- View aggregated API documentation status
+- Configure OpenAPI endpoints for backends
+- Access unified Swagger UI interface
+- Manage authentication for protected OpenAPI endpoints
+- Monitor OpenAPI cache and refresh data
+
+## OpenAPI Integration
+
+The Nginx Configuration Manager now includes powerful OpenAPI/Swagger aggregation capabilities, allowing you to create a unified API documentation interface from multiple backend services.
+
+### OpenAPI Features
+
+- **Dynamic Aggregation**: Automatically fetches and combines OpenAPI specifications from multiple backend services
+- **Unified Documentation**: Single Swagger UI interface displaying all backend APIs
+- **Authentication Support**: Bearer tokens, Basic auth, and API key authentication for protected OpenAPI endpoints
+- **Cache Management**: Intelligent caching with manual refresh capabilities
+- **Real-time Status**: Monitor OpenAPI endpoint health and last update times
+- **Path Transformation**: Automatic path prefixing and conflict resolution
+
+### Configuration
+
+Add OpenAPI configuration to your backends:
+
+```yaml
+backends:
+  - id: petstore-api
+    name: "Petstore API"
+    servers:
+      - host: "petstore.swagger.io"
+        port: 443
+    openapi:
+      enabled: true
+      endpoints:
+        - url: "https://petstore.swagger.io/v2/swagger.json"
+          auth:
+            type: "none"
+```
+
+### Web Interface
+
+The OpenAPI section in the web interface provides:
+
+1. **Dashboard**: Overview of OpenAPI status and metrics
+2. **Backend Management**: Configure OpenAPI endpoints per backend
+3. **Swagger UI**: Unified documentation interface at `/api/v1/openapi/swagger-ui`
+4. **Cache Control**: Manual refresh and status monitoring
+
+### API Endpoints
+
+```bash
+# Get aggregated OpenAPI specification
+GET /api/v1/openapi/spec
+
+# Refresh OpenAPI cache
+POST /api/v1/openapi/refresh
+
+# Get OpenAPI service status
+GET /api/v1/openapi/status
+
+# Access Swagger UI
+GET /api/v1/openapi/swagger-ui
+```
+
+For detailed OpenAPI configuration examples and advanced features, see `OPENAPI_FEATURES.md`.
+
 ## Advanced Features: Regex Pattern Matching and URL Rewriting
 
 The Nginx Configuration Manager now supports advanced routing capabilities through regex pattern matching and URL rewriting. These features enable sophisticated traffic routing scenarios.
@@ -434,6 +505,25 @@ POST /api/v1/config/reload
 GET /api/v1/status
 ```
 
+### OpenAPI Management
+
+```bash
+# Get aggregated OpenAPI specification
+GET /api/v1/openapi/spec
+
+# Refresh OpenAPI cache from all backends
+POST /api/v1/openapi/refresh
+
+# Get OpenAPI service status and metrics
+GET /api/v1/openapi/status
+
+# Access unified Swagger UI interface
+GET /api/v1/openapi/swagger-ui
+
+# Get OpenAPI status for specific backend
+GET /api/v1/backends/{id}/openapi/status
+```
+
 ## Configuration Examples
 
 ### Example 1: Simple API Gateway
@@ -538,7 +628,63 @@ servers:
           required: true
 ```
 
-## Architecture
+### Example 3: API Gateway with OpenAPI Aggregation
+
+```yaml
+backends:
+  - id: petstore-api
+    name: Petstore API
+    servers:
+      - host: petstore.swagger.io
+        port: 443
+    openapi:
+      enabled: true
+      endpoints:
+        - url: "https://petstore.swagger.io/v2/swagger.json"
+          auth:
+            type: "none"
+  
+  - id: user-service
+    name: User Service
+    servers:
+      - host: users.internal
+        port: 3000
+    openapi:
+      enabled: true
+      endpoints:
+        - url: "http://users.internal:3000/api-docs"
+          auth:
+            type: "bearer"
+            token: "your-api-token"
+
+servers:
+  - id: api-gateway
+    name: API Gateway with OpenAPI
+    listen: ["80", "443 ssl"]
+    server_name: ["api.example.com"]
+    routes:
+      - name: Petstore API
+        path: "/petstore"
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        backend_id: petstore-api
+        strip_path: true
+      
+      - name: User Service
+        path: "/users"
+        methods: ["GET", "POST", "PUT", "DELETE"]
+        backend_id: user-service
+        strip_path: true
+        
+      - name: Unified API Documentation
+        path: "/docs"
+        proxy_pass: "http://localhost:8080/api/v1/openapi/swagger-ui"
+```
+
+This configuration enables:
+- Two backend services with OpenAPI endpoints
+- Automatic API documentation aggregation
+- Unified Swagger UI accessible at `/docs`
+- Different authentication methods for OpenAPI endpoints
 
 The application follows a clean architecture pattern:
 
@@ -645,11 +791,13 @@ For support and questions:
 
 ## Roadmap
 
+- [x] OpenAPI/Swagger aggregation and unified documentation
+- [x] Dynamic API specification discovery
+- [x] Unified Swagger UI interface
 - [ ] Import existing nginx configurations
 - [ ] Configuration templates
 - [ ] Metrics and monitoring integration
 - [ ] Multi-instance management
 - [ ] Kubernetes integration
 - [ ] Advanced authentication methods
-- [ ] API documentation with Swagger
 - [ ] Configuration versioning and rollback

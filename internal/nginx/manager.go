@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go-apigateway-gui/internal/models"
+	"go-apigateway-gui/internal/openapi"
 
 	"github.com/flosch/pongo2/v6"
 	"gopkg.in/yaml.v3"
@@ -20,10 +21,11 @@ type Manager struct {
 	templatesPath        string
 	apiGatewayConfigPath string
 	config               *models.Configuration
+	openAPIAggregator    *openapi.Aggregator
 }
 
 func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath string) *Manager {
-	return &Manager{
+	mgr := &Manager{
 		configPath:           configPath,
 		executablePath:       executablePath,
 		backupPath:           "./backups",
@@ -31,6 +33,9 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		apiGatewayConfigPath: apiGatewayConfigPath,
 		config:               &models.Configuration{},
 	}
+	// Initialize OpenAPI aggregator with default 5-minute cache TTL
+	mgr.openAPIAggregator = openapi.NewAggregator(mgr.config, 5*time.Minute)
+	return mgr
 }
 
 // LoadConfiguration loads the current configuration from YAML file
@@ -77,6 +82,9 @@ func (m *Manager) SaveConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+
+	// Update OpenAPI aggregator configuration
+	m.UpdateOpenAPIAggregatorConfig()
 
 	return nil
 }
@@ -379,6 +387,16 @@ func (m *Manager) GetServer(id string) (*models.Server, error) {
 		}
 	}
 	return nil, fmt.Errorf("server with ID %s not found", id)
+}
+
+// GetOpenAPIAggregator returns the OpenAPI aggregator instance
+func (m *Manager) GetOpenAPIAggregator() *openapi.Aggregator {
+	return m.openAPIAggregator
+}
+
+// UpdateOpenAPIAggregatorConfig updates the aggregator's configuration reference
+func (m *Manager) UpdateOpenAPIAggregatorConfig() {
+	m.openAPIAggregator.UpdateConfiguration(m.config)
 }
 
 // generateID generates a unique ID

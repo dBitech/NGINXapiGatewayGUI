@@ -49,6 +49,9 @@
                             <a class="nav-link" href="#" data-section="routes">
                                 <i class="fas fa-route me-2"></i>Routes
                             </a>
+                            <a class="nav-link" href="#" data-section="openapi">
+                                <i class="fas fa-file-code me-2"></i>OpenAPI
+                            </a>
                             <a class="nav-link" href="#" data-section="config">
                                 <i class="fas fa-cog me-2"></i>Configuration
                             </a>
@@ -201,6 +204,67 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- OpenAPI Section -->
+                <div id="openapi-section" class="section" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2>OpenAPI Aggregation</h2>
+                        <div class="btn-group">
+                            <button class="btn btn-success" onclick="refreshOpenAPICache()">
+                                <i class="fas fa-sync-alt me-2"></i>Refresh Cache
+                            </button>
+                            <button class="btn btn-primary" onclick="viewSwaggerUI()">
+                                <i class="fas fa-external-link-alt me-2"></i>View Swagger UI
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- OpenAPI Status Card -->
+                    <div class="row mb-4">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-info-circle me-2"></i>Service Status
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="openapi-status-content">
+                                        <div class="text-center py-3">
+                                            <div class="spinner-border" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                            <p class="mt-2">Loading OpenAPI status...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- OpenAPI Backends Card -->
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-server me-2"></i>Backend OpenAPI Status
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="openapi-backends-content">
+                                        <div class="text-center py-3">
+                                            <div class="spinner-border" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                            <p class="mt-2">Loading backend status...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -331,6 +395,96 @@
                                                 <input type="text" class="form-control" id="health-check-body-regex" placeholder="healthy|ok">
                                                 <small class="form-text text-muted">Regex pattern to match response body</small>
                                             </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- OpenAPI Configuration -->
+                        <div class="card mt-3">
+                            <div class="card-header">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="openapi-enabled">
+                                    <label class="form-check-label" for="openapi-enabled">
+                                        <strong>Enable OpenAPI/Swagger Integration</strong>
+                                        <small class="text-muted d-block">Aggregate OpenAPI specifications from this backend</small>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="card-body" id="openapi-config" style="display: none;">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">OpenAPI Endpoints</label>
+                                            <div id="openapi-endpoints">
+                                                <div class="input-group mb-2">
+                                                    <input type="text" class="form-control" placeholder="/swagger.json or /openapi.yaml" name="openapi-endpoint">
+                                                    <button class="btn btn-outline-danger" type="button" onclick="removeOpenAPIEndpoint(this)">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="addOpenAPIEndpoint()">
+                                                <i class="fas fa-plus me-2"></i>Add Endpoint
+                                            </button>
+                                            <small class="form-text text-muted">URLs where OpenAPI specs can be fetched from this backend</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Authentication</label>
+                                            <select class="form-select" id="openapi-auth-type">
+                                                <option value="none">None</option>
+                                                <option value="bearer">Bearer Token</option>
+                                                <option value="basic">Basic Auth</option>
+                                                <option value="api_key">API Key</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3">
+                                            <label class="form-label">Request Timeout</label>
+                                            <input type="text" class="form-control" id="openapi-timeout" value="30s">
+                                            <small class="form-text text-muted">Timeout for fetching OpenAPI specs</small>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label">Custom Headers</label>
+                                            <textarea class="form-control" id="openapi-headers" rows="3" placeholder='{"Accept": "application/json", "User-Agent": "nginx-gateway"}'></textarea>
+                                            <small class="form-text text-muted">JSON format: {"Header": "Value"}</small>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Authentication Configuration -->
+                                <div class="row" id="openapi-auth-config" style="display: none;">
+                                    <div class="col-md-6">
+                                        <div class="mb-3" id="bearer-token-config" style="display: none;">
+                                            <label class="form-label">Bearer Token</label>
+                                            <input type="password" class="form-control" id="openapi-bearer-token" placeholder="your-bearer-token">
+                                        </div>
+                                        <div class="mb-3" id="basic-auth-config" style="display: none;">
+                                            <label class="form-label">Username</label>
+                                            <input type="text" class="form-control" id="openapi-basic-username">
+                                        </div>
+                                        <div class="mb-3" id="api-key-config" style="display: none;">
+                                            <label class="form-label">API Key Name</label>
+                                            <input type="text" class="form-control" id="openapi-api-key-name" placeholder="X-API-Key">
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="mb-3" id="basic-password-config" style="display: none;">
+                                            <label class="form-label">Password</label>
+                                            <input type="password" class="form-control" id="openapi-basic-password">
+                                        </div>
+                                        <div class="mb-3" id="api-key-value-config" style="display: none;">
+                                            <label class="form-label">API Key Value</label>
+                                            <input type="password" class="form-control" id="openapi-api-key-value">
+                                        </div>
+                                        <div class="mb-3" id="api-key-location-config" style="display: none;">
+                                            <label class="form-label">API Key Location</label>
+                                            <select class="form-select" id="openapi-api-key-location">
+                                                <option value="header">Header</option>
+                                                <option value="query">Query Parameter</option>
+                                            </select>
                                         </div>
                                     </div>
                                 </div>

@@ -58,6 +58,9 @@ function showSection(section) {
         case 'routes':
             loadServersForRoutes();
             break;
+        case 'openapi':
+            loadOpenAPISection();
+            break;
         case 'config':
             loadGlobalConfig();
             break;
@@ -182,8 +185,11 @@ function renderBackends(backends) {
                                 }
                             </div>
                             <div class="col-6">
-                                <small class="text-muted">Max Fails:</small><br>
-                                <span class="badge bg-warning">${backend.max_fails || 3}</span>
+                                <small class="text-muted">OpenAPI:</small><br>
+                                ${backend.openapi && backend.openapi.enabled ? 
+                                    `<span class="badge bg-primary">Enabled</span>` : 
+                                    `<span class="badge bg-secondary">Disabled</span>`
+                                }
                             </div>
                         </div>
                         ${backend.servers && backend.servers.length > 0 ? 
@@ -197,6 +203,13 @@ function renderBackends(backends) {
                                 <small class="text-muted">Health Check:</small><br>
                                 <small>${backend.health_check.method || 'GET'} ${backend.health_check.path || '/health'}</small><br>
                                 <small>Interval: ${backend.health_check.interval || '30s'}</small>
+                            </div>` : ''
+                        }
+                        ${backend.openapi && backend.openapi.enabled ? 
+                            `<div class="mt-2">
+                                <small class="text-muted">OpenAPI:</small><br>
+                                <small>Endpoints: ${backend.openapi.endpoints ? backend.openapi.endpoints.length : 0}</small><br>
+                                <small>Auth: ${backend.openapi.auth ? backend.openapi.auth.type : 'none'}</small>
                             </div>` : ''
                         }
                     </div>
@@ -215,6 +228,16 @@ function showBackendModal(backendId = null) {
     // Reset form
     document.getElementById('backend-form').reset();
     document.getElementById('backend-id').value = '';
+    
+    // Reset OpenAPI endpoints
+    document.getElementById('openapi-endpoints').innerHTML = `
+        <div class="input-group mb-2">
+            <input type="text" class="form-control" placeholder="/swagger.json or /openapi.yaml" name="openapi-endpoint">
+            <button class="btn btn-outline-danger" type="button" onclick="removeOpenAPIEndpoint(this)">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    `;
     
     // Reset servers container
     document.getElementById('backend-servers').innerHTML = `
@@ -331,6 +354,65 @@ async function loadBackendForEdit(backendId) {
             toggleHealthCheckPanel(false);
         }
         
+        // Load OpenAPI configuration
+        if (backend.openapi) {
+            document.getElementById('openapi-enabled').checked = backend.openapi.enabled || false;
+            document.getElementById('openapi-timeout').value = backend.openapi.timeout || '30s';
+            
+            // Load endpoints
+            if (backend.openapi.endpoints && backend.openapi.endpoints.length > 0) {
+                const container = document.getElementById('openapi-endpoints');
+                container.innerHTML = '';
+                
+                backend.openapi.endpoints.forEach(endpoint => {
+                    const endpointHtml = `
+                        <div class="input-group mb-2">
+                            <input type="text" class="form-control" placeholder="/swagger.json or /openapi.yaml" name="openapi-endpoint" value="${endpoint}">
+                            <button class="btn btn-outline-danger" type="button" onclick="removeOpenAPIEndpoint(this)">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    `;
+                    container.insertAdjacentHTML('beforeend', endpointHtml);
+                });
+            }
+            
+            // Load headers
+            if (backend.openapi.headers && Object.keys(backend.openapi.headers).length > 0) {
+                document.getElementById('openapi-headers').value = JSON.stringify(backend.openapi.headers, null, 2);
+            }
+            
+            // Load authentication
+            if (backend.openapi.auth) {
+                document.getElementById('openapi-auth-type').value = backend.openapi.auth.type || 'none';
+                
+                switch (backend.openapi.auth.type) {
+                    case 'bearer':
+                        document.getElementById('openapi-bearer-token').value = backend.openapi.auth.token || '';
+                        break;
+                    case 'basic':
+                        document.getElementById('openapi-basic-username').value = backend.openapi.auth.username || '';
+                        document.getElementById('openapi-basic-password').value = backend.openapi.auth.password || '';
+                        break;
+                    case 'api_key':
+                        document.getElementById('openapi-api-key-name').value = backend.openapi.auth.key_name || '';
+                        document.getElementById('openapi-api-key-value').value = backend.openapi.auth.key_value || '';
+                        document.getElementById('openapi-api-key-location').value = backend.openapi.auth.location || 'header';
+                        break;
+                }
+            } else {
+                document.getElementById('openapi-auth-type').value = 'none';
+            }
+            
+            // Toggle OpenAPI panel visibility
+            toggleOpenAPIConfig();
+            toggleOpenAPIAuth();
+        } else {
+            // Reset OpenAPI form
+            document.getElementById('openapi-enabled').checked = false;
+            toggleOpenAPIConfig();
+        }
+        
     } catch (error) {
         console.error('Failed to load backend for edit:', error);
     }
@@ -443,6 +525,58 @@ async function saveBackend() {
                 status_codes: statusCodes.length > 0 ? statusCodes : [200],
                 body_regex: document.getElementById('health-check-body-regex').value || ''
             }
+        };
+    }
+    
+    // Collect OpenAPI configuration
+    const openAPIEnabled = document.getElementById('openapi-enabled').checked;
+    if (openAPIEnabled) {
+        const endpoints = [];
+        document.querySelectorAll('[name="openapi-endpoint"]').forEach(input => {
+            if (input.value.trim()) {
+                endpoints.push(input.value.trim());
+            }
+        });
+        
+        const headersInput = document.getElementById('openapi-headers').value;
+        let headers = {};
+        if (headersInput) {
+            try {
+                headers = JSON.parse(headersInput);
+            } catch (e) {
+                console.warn('Invalid JSON in OpenAPI headers, using default');
+                headers = {};
+            }
+        }
+        
+        const authType = document.getElementById('openapi-auth-type').value;
+        let auth = { type: authType };
+        
+        switch (authType) {
+            case 'bearer':
+                auth.token = document.getElementById('openapi-bearer-token').value;
+                break;
+            case 'basic':
+                auth.username = document.getElementById('openapi-basic-username').value;
+                auth.password = document.getElementById('openapi-basic-password').value;
+                break;
+            case 'api_key':
+                auth.key_name = document.getElementById('openapi-api-key-name').value;
+                auth.key_value = document.getElementById('openapi-api-key-value').value;
+                auth.location = document.getElementById('openapi-api-key-location').value;
+                break;
+        }
+        
+        backend.openapi = {
+            enabled: true,
+            endpoints: endpoints,
+            timeout: document.getElementById('openapi-timeout').value || '30s',
+            headers: headers,
+            auth: authType !== 'none' ? auth : null
+        };
+    } else {
+        backend.openapi = {
+            enabled: false
         };
     }
     
@@ -1435,3 +1569,263 @@ function addCacheValidRule(statusCodes = '', ttl = '') {
     
     container.appendChild(ruleDiv);
 }
+
+// OpenAPI functions
+async function loadOpenAPISection() {
+    loadOpenAPIStatus();
+    loadOpenAPIBackends();
+}
+
+async function loadOpenAPIStatus() {
+    try {
+        const status = await apiCall('GET', '/openapi/status');
+        renderOpenAPIStatus(status);
+    } catch (error) {
+        document.getElementById('openapi-status-content').innerHTML = 
+            `<div class="alert alert-danger">Failed to load OpenAPI status: ${error.message}</div>`;
+    }
+}
+
+async function loadOpenAPIBackends() {
+    try {
+        const response = await apiCall('GET', '/openapi/backends');
+        renderOpenAPIBackends(response.backends || []);
+    } catch (error) {
+        document.getElementById('openapi-backends-content').innerHTML = 
+            `<div class="alert alert-danger">Failed to load backend status: ${error.message}</div>`;
+    }
+}
+
+function renderOpenAPIStatus(status) {
+    const container = document.getElementById('openapi-status-content');
+    
+    let html = `
+        <div class="row">
+            <div class="col-md-3">
+                <div class="text-center">
+                    <h4 class="text-primary">${status.active_backends || 0}</h4>
+                    <small class="text-muted">Active Backends</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <h4 class="text-success">${status.cached_specs || 0}</h4>
+                    <small class="text-muted">Cached Specs</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <h4 class="text-info">${status.total_paths || 0}</h4>
+                    <small class="text-muted">Total Paths</small>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="text-center">
+                    <h4 class="text-warning">${status.cache_ttl || 'N/A'}</h4>
+                    <small class="text-muted">Cache TTL</small>
+                </div>
+            </div>
+        </div>
+        <hr>
+        <div class="row">
+            <div class="col-md-6">
+                <strong>Last Updated:</strong> ${status.last_updated || 'Never'}
+            </div>
+            <div class="col-md-6">
+                <strong>Service Status:</strong> 
+                <span class="badge ${status.active_backends > 0 ? 'bg-success' : 'bg-warning'}">
+                    ${status.active_backends > 0 ? 'Active' : 'No Active Backends'}
+                </span>
+            </div>
+        </div>
+    `;
+    
+    container.innerHTML = html;
+}
+
+function renderOpenAPIBackends(backends) {
+    const container = document.getElementById('openapi-backends-content');
+    
+    if (!backends || backends.length === 0) {
+        container.innerHTML = '<div class="alert alert-info">No backends with OpenAPI configuration found.</div>';
+        return;
+    }
+    
+    let html = '<div class="table-responsive"><table class="table table-striped"><thead><tr>' +
+               '<th>Backend</th><th>Status</th><th>OpenAPI Endpoints</th><th>Last Fetch</th><th>Actions</th></tr></thead><tbody>';
+    
+    backends.forEach(backend => {
+        const status = backend.openapi_status || 'disabled';
+        const statusBadge = status === 'available' ? 'bg-success' : 
+                           status === 'error' ? 'bg-danger' : 
+                           status === 'enabled' ? 'bg-warning' : 'bg-secondary';
+        
+        const statusText = status === 'available' ? 'Available' :
+                          status === 'enabled' ? 'Enabled' :
+                          status === 'error' ? 'Error' : 'Disabled';
+        
+        const openAPIEndpoints = backend.openapi && backend.openapi.endpoints ? 
+                                backend.openapi.endpoints.join(', ') : 'None';
+        
+        html += `
+            <tr>
+                <td>
+                    <strong>${backend.name}</strong><br>
+                    <small class="text-muted">${backend.description || ''}</small>
+                    ${backend.openapi && backend.openapi.enabled ? '<i class="fas fa-check-circle text-success ms-2" title="OpenAPI Enabled"></i>' : ''}
+                </td>
+                <td>
+                    <span class="badge ${statusBadge}">${statusText}</span>
+                    ${backend.error ? `<br><small class="text-danger">${backend.error}</small>` : ''}
+                </td>
+                <td>
+                    <small class="text-muted">${openAPIEndpoints}</small>
+                </td>
+                <td>
+                    ${backend.last_fetched ? new Date(backend.last_fetched).toLocaleString() : 'Never'}
+                </td>
+                <td>
+                    <div class="btn-group btn-group-sm">
+                        ${status === 'available' ? 
+                            `<button class="btn btn-outline-primary btn-sm" onclick="viewBackendSpec('${backend.id}')">
+                                <i class="fas fa-eye"></i> View
+                            </button>` : ''
+                        }
+                        ${backend.openapi && backend.openapi.enabled ? 
+                            `<button class="btn btn-outline-secondary btn-sm" onclick="refreshBackendSpec('${backend.id}')">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>` : ''
+                        }
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+    
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+async function refreshOpenAPICache() {
+    try {
+        showAlert('info', 'Refreshing OpenAPI cache...');
+        const result = await apiCall('POST', '/openapi/refresh');
+        showAlert('success', `OpenAPI cache refreshed successfully at ${result.timestamp}`);
+        loadOpenAPISection(); // Reload the section
+    } catch (error) {
+        showAlert('error', `Failed to refresh OpenAPI cache: ${error.message}`);
+    }
+}
+
+async function refreshBackendSpec(backendId) {
+    try {
+        showAlert('info', `Refreshing OpenAPI spec for backend ${backendId}...`);
+        await apiCall('POST', '/openapi/refresh');
+        showAlert('success', `Refreshed OpenAPI spec for backend ${backendId}`);
+        loadOpenAPIBackends(); // Reload backend status
+    } catch (error) {
+        showAlert('error', `Failed to refresh spec for backend ${backendId}: ${error.message}`);
+    }
+}
+
+async function viewSwaggerUI() {
+    try {
+        // Open the dedicated Swagger UI page
+        const url = '/api/v1/openapi/swagger-ui';
+        window.open(url, '_blank', 'width=1200,height=800');
+    } catch (error) {
+        showAlert('error', `Failed to open Swagger UI: ${error.message}`);
+    }
+}
+
+async function viewBackendSpec(backendId) {
+    try {
+        // This would need a specific endpoint to get individual backend specs
+        showAlert('info', `Viewing spec for backend ${backendId} - feature coming soon`);
+    } catch (error) {
+        showAlert('error', `Failed to view spec for backend ${backendId}: ${error.message}`);
+    }
+}
+
+// Backend modal OpenAPI configuration functions
+function toggleOpenAPIConfig() {
+    const enabled = document.getElementById('openapi-enabled').checked;
+    const config = document.getElementById('openapi-config');
+    const authConfig = document.getElementById('openapi-auth-config');
+    
+    config.style.display = enabled ? 'block' : 'none';
+    if (!enabled) {
+        authConfig.style.display = 'none';
+    }
+}
+
+function toggleOpenAPIAuth() {
+    const authType = document.getElementById('openapi-auth-type').value;
+    const authConfig = document.getElementById('openapi-auth-config');
+    const bearerConfig = document.getElementById('bearer-token-config');
+    const basicAuthConfig = document.getElementById('basic-auth-config');
+    const basicPasswordConfig = document.getElementById('basic-password-config');
+    const apiKeyConfig = document.getElementById('api-key-config');
+    const apiKeyValueConfig = document.getElementById('api-key-value-config');
+    const apiKeyLocationConfig = document.getElementById('api-key-location-config');
+    
+    // Hide all auth configs first
+    authConfig.style.display = 'none';
+    bearerConfig.style.display = 'none';
+    basicAuthConfig.style.display = 'none';
+    basicPasswordConfig.style.display = 'none';
+    apiKeyConfig.style.display = 'none';
+    apiKeyValueConfig.style.display = 'none';
+    apiKeyLocationConfig.style.display = 'none';
+    
+    // Show relevant auth config
+    if (authType !== 'none') {
+        authConfig.style.display = 'block';
+        
+        switch (authType) {
+            case 'bearer':
+                bearerConfig.style.display = 'block';
+                break;
+            case 'basic':
+                basicAuthConfig.style.display = 'block';
+                basicPasswordConfig.style.display = 'block';
+                break;
+            case 'api_key':
+                apiKeyConfig.style.display = 'block';
+                apiKeyValueConfig.style.display = 'block';
+                apiKeyLocationConfig.style.display = 'block';
+                break;
+        }
+    }
+}
+
+function addOpenAPIEndpoint() {
+    const container = document.getElementById('openapi-endpoints');
+    const div = document.createElement('div');
+    div.className = 'input-group mb-2';
+    div.innerHTML = `
+        <input type="text" class="form-control" placeholder="/swagger.json or /openapi.yaml" name="openapi-endpoint">
+        <button class="btn btn-outline-danger" type="button" onclick="removeOpenAPIEndpoint(this)">
+            <i class="fas fa-trash"></i>
+        </button>
+    `;
+    container.appendChild(div);
+}
+
+function removeOpenAPIEndpoint(button) {
+    button.closest('.input-group').remove();
+}
+
+// Initialize OpenAPI configuration handlers
+document.addEventListener('DOMContentLoaded', function() {
+    // Add event listeners for OpenAPI configuration
+    const openApiEnabled = document.getElementById('openapi-enabled');
+    if (openApiEnabled) {
+        openApiEnabled.addEventListener('change', toggleOpenAPIConfig);
+    }
+    
+    const authTypeSelect = document.getElementById('openapi-auth-type');
+    if (authTypeSelect) {
+        authTypeSelect.addEventListener('change', toggleOpenAPIAuth);
+    }
+});
