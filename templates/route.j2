@@ -1,0 +1,122 @@
+        {% if route.RegexConfig and route.RegexConfig.Enabled %}
+        location {{ route.RegexConfig.Modifier }}{% if route.RegexConfig.Pattern %}{{ route.RegexConfig.Pattern }}{% else %}{{ route.Path }}{% endif %} {
+        {% else %}
+        location {{ route.Path }} {
+        {% endif %}
+            {% if route.RateLimiting and route.RateLimiting.Enabled %}
+            limit_req zone=api burst={{ route.RateLimiting.Burst }}{% if route.RateLimiting.Nodelay %} nodelay{% endif %};
+            limit_req_status {{ route.RateLimiting.StatusCode }};
+            {% endif %}
+
+            {% if route.CORS and route.CORS.Enabled %}
+            # CORS headers
+            add_header 'Access-Control-Allow-Origin' '{% for origin in route.CORS.AllowOrigins %}{{ origin }},{% endfor %}' always;
+            add_header 'Access-Control-Allow-Methods' '{% for method in route.CORS.AllowMethods %}{{ method }},{% endfor %}' always;
+            add_header 'Access-Control-Allow-Headers' '{% for header in route.CORS.AllowHeaders %}{{ header }},{% endfor %}' always;
+            {% if route.CORS.AllowCredentials %}add_header 'Access-Control-Allow-Credentials' 'true' always;{% endif %}
+            {% if route.CORS.MaxAge %}add_header 'Access-Control-Max-Age' '{{ route.CORS.MaxAge }}' always;{% endif %}
+            
+            if ($request_method = 'OPTIONS') {
+                return 204;
+            }
+            {% endif %}
+
+            {% if route.Authentication and route.Authentication.Required %}
+            {% if route.Authentication.Type == "basic" %}
+            auth_basic "Protected Area";
+            auth_basic_user_file {{ route.Authentication.Config.user_file }};
+            {% endif %}
+            {% endif %}
+
+            {% if route.Caching and route.Caching.Enabled %}
+            # Caching configuration
+            proxy_cache cache_zone;
+            proxy_cache_key {{ route.Caching.Key }};
+            {% if route.Caching.MinUses %}proxy_cache_min_uses {{ route.Caching.MinUses }};{% endif %}
+            
+            # Cache validity rules with per-URI TTL handling
+            {% if route.Caching.URIRules %}
+            # Set cache TTL based on URI patterns
+            set $cache_ttl "{{ route.Caching.TTL }}";
+            set $no_cache 0;
+            {% for uri_rule in route.Caching.URIRules %}
+            {% if uri_rule.Type == "exact" %}
+            if ($uri = "{{ uri_rule.Pattern }}") {
+                {% if uri_rule.NoCache %}set $no_cache 1;{% else %}set $cache_ttl "{{ uri_rule.TTL }}";{% endif %}
+            }
+            {% elif uri_rule.Type == "prefix" %}
+            if ($uri ~ "^{{ uri_rule.Pattern }}") {
+                {% if uri_rule.NoCache %}set $no_cache 1;{% else %}set $cache_ttl "{{ uri_rule.TTL }}";{% endif %}
+            }
+            {% elif uri_rule.Type == "regex" %}
+            if ($uri ~ "{{ uri_rule.Pattern }}") {
+                {% if uri_rule.NoCache %}set $no_cache 1;{% else %}set $cache_ttl "{{ uri_rule.TTL }}";{% endif %}
+            }
+            {% endif %}
+            {% endfor %}
+            
+            # Apply no-cache rules
+            proxy_cache_bypass $no_cache;
+            proxy_no_cache $no_cache;
+            {% endif %}
+            
+            # Default cache validity
+            {% if route.Caching.Valid %}
+            {% for valid_rule in route.Caching.Valid %}
+            proxy_cache_valid {% for status_code in valid_rule.StatusCodes %}{{ status_code }} {% endfor %}{{ valid_rule.TTL }};
+            {% endfor %}
+            {% else %}
+            proxy_cache_valid {% for status_code in route.Caching.StatusCodes %}{{ status_code }} {% endfor %}{{ route.Caching.TTL }};
+            {% endif %}
+            
+            # Cache methods
+            {% if route.Caching.Methods %}
+            proxy_cache_methods {% for method in route.Caching.Methods %}{{ method }} {% endfor %};
+            {% endif %}
+            
+            # Bypass cache conditions
+            {% for bypass_condition in route.Caching.Bypass %}
+            proxy_cache_bypass {{ bypass_condition }};
+            proxy_no_cache {{ bypass_condition }};
+            {% endfor %}
+            
+            # Headers to ignore in cache key
+            {% for ignore_header in route.Caching.IgnoreHeaders %}
+            proxy_ignore_headers {{ ignore_header }};
+            {% endfor %}
+            
+            # Cache headers for debugging
+            add_header X-Cache-Status $upstream_cache_status always;
+            {% endif %}
+
+            # URL rewriting rules
+            {% for rewrite_rule in route.RewriteRules %}
+            {% if rewrite_rule.Enabled %}
+            rewrite {{ rewrite_rule.Pattern }} {{ rewrite_rule.Replacement }}{% if rewrite_rule.Flag %} {{ rewrite_rule.Flag }}{% endif %};
+            {% endif %}
+            {% endfor %}
+
+            # Custom headers for this route
+            {% for header_name, header_value in route.Headers.items() %}
+            proxy_set_header {{ header_name }} "{{ header_value }}";
+            {% endfor %}
+
+            {% if not route.PreserveHost %}
+            proxy_set_header Host $host;
+            {% endif %}
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+
+            {% if route.Timeout %}
+            proxy_connect_timeout {{ route.Timeout }};
+            proxy_send_timeout {{ route.Timeout }};
+            proxy_read_timeout {{ route.Timeout }};
+            {% endif %}
+
+            {% if route.StripPath %}
+            rewrite ^{{ route.Path }}(.*)$ $1 break;
+            {% endif %}
+
+            proxy_pass http://{{ route.BackendID }};
+        }

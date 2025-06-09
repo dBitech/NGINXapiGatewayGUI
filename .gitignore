@@ -1,0 +1,47 @@
+# Logs
+*.log
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+nginx-config-manager
+nginx-config-manager.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories
+vendor/
+
+# Configuration backups
+backups/
+
+# Runtime configuration
+apigateway-config.yaml
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+tmp/
+temp/

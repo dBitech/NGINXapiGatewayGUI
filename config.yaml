@@ -1,0 +1,24 @@
+# Nginx API Gateway GUI Configuration File
+# This file contains all configurable options for the application
+
+# Server configuration
+port: "8080"                              # Port for the web interface
+log_level: "info"                         # Log level: debug, info, warn, error
+
+# Nginx configuration (Windows paths)
+nginx_config_path: "./test-nginx/conf/nginx.conf"  # Path to main nginx config file
+nginx_executable_path: "C:/nginx/nginx.exe"    # Path to nginx executable
+
+# API Gateway configuration
+apigateway_config_path: "./apigateway-config.yaml"  # Path where backend/server configs are stored
+
+# Application paths
+backup_path: "./backups"                  # Directory for configuration backups
+web_assets_path: "./web"                  # Path to web assets (templates, static files)
+
+# Note: All relative paths will be resolved to absolute paths at runtime
+# Environment variables can override any setting using APIGATEWAY_ prefix:
+# Examples:
+#   APIGATEWAY_PORT=9000 will override the port setting
+#   APIGATEWAY_NGINX_CONFIG_PATH=D:/nginx/conf/nginx.conf
+#   APIGATEWAY_NGINX_EXECUTABLE_PATH=D:/nginx/nginx.exe

@@ -1,0 +1,211 @@
+# Example configuration showing various nginx features
+# This file demonstrates the configuration structure used by the nginx manager
+
+backends:
+  - id: backend_example_api
+    name: Example API Backend
+    description: Main API servers for example application
+    load_balance: round_robin
+    max_fails: 3
+    fail_timeout: 30s
+    servers:
+      - id: server_1
+        host: 10.0.1.10
+        port: 8080
+        weight: 1
+        backup: false
+        down: false
+      - id: server_2
+        host: 10.0.1.11
+        port: 8080
+        weight: 1
+        backup: false
+        down: false
+    health_check:
+      enabled: false
+      path: /health
+      interval: 10s
+      timeout: 5s
+      rises: 2
+      falls: 3
+    headers:
+      X-Backend-Name: example-api
+    created_at: "2024-01-01T00:00:00Z"
+    updated_at: "2024-01-01T00:00:00Z"
+
+  - id: backend_example_auth
+    name: Authentication Service
+    description: Authentication and authorization service
+    load_balance: least_conn
+    max_fails: 2
+    fail_timeout: 10s
+    servers:
+      - id: auth_server_1
+        host: auth.internal.example.com
+        port: 3000
+        weight: 1
+        backup: false
+        down: false
+    created_at: "2024-01-01T00:00:00Z"
+    updated_at: "2024-01-01T00:00:00Z"
+
+servers:
+  - id: server_example_main
+    name: Main API Gateway
+    listen:
+      - "80"
+      - "443 ssl"
+    server_name:
+      - "api.example.com"
+      - "www.api.example.com"
+    access_log: "/var/log/nginx/api_access.log"
+    error_log: "/var/log/nginx/api_error.log"
+    client_max_body_size: "10m"
+    ssl:
+      enabled: true
+      certificate: "/etc/ssl/certs/api.example.com.crt"
+      private_key: "/etc/ssl/private/api.example.com.key"
+      protocols:
+        - "TLSv1.2"
+        - "TLSv1.3"
+      ciphers: "ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384"
+      redirect: true
+    headers:
+      X-Frame-Options: "DENY"
+      X-Content-Type-Options: "nosniff"
+      X-XSS-Protection: "1; mode=block"
+    routes:
+      - id: route_api_v1
+        name: API v1 Routes
+        description: Main API endpoints version 1
+        path: "/api/v1"
+        methods:
+          - "GET"
+          - "POST"
+          - "PUT"
+          - "DELETE"
+        backend_id: backend_example_api
+        strip_path: true
+        preserve_host: false
+        timeout: "30s"
+        rate_limiting:
+          enabled: true
+          rate: "100r/m"
+          burst: 20
+          nodelay: false
+          status_code: 429
+        caching:
+          enabled: true
+          ttl: "5m"
+          key: "$scheme$request_method$host$request_uri"
+          methods:
+            - "GET"
+          status_codes:
+            - 200
+            - 301
+            - 302
+          ignore_headers:
+            - "Set-Cookie"
+            - "Authorization"
+        cors:
+          enabled: true
+          allow_origins:
+            - "https://app.example.com"
+            - "https://admin.example.com"
+          allow_methods:
+            - "GET"
+            - "POST"
+            - "PUT"
+            - "DELETE"
+            - "OPTIONS"
+          allow_headers:
+            - "Content-Type"
+            - "Authorization"
+            - "X-Requested-With"
+          expose_headers:
+            - "X-Total-Count"
+            - "X-Page-Count"
+          allow_credentials: true
+          max_age: 86400
+        headers:
+          X-API-Version: "v1"
+          X-Service-Name: "api-gateway"
+        created_at: "2024-01-01T00:00:00Z"
+        updated_at: "2024-01-01T00:00:00Z"
+
+      - id: route_auth
+        name: Authentication Routes
+        description: Authentication and authorization endpoints
+        path: "/auth"
+        methods:
+          - "POST"
+          - "GET"
+        backend_id: backend_example_auth
+        strip_path: true
+        preserve_host: false
+        timeout: "10s"
+        rate_limiting:
+          enabled: true
+          rate: "10r/s"
+          burst: 5
+          nodelay: true
+          status_code: 429
+        cors:
+          enabled: true
+          allow_origins:
+            - "https://app.example.com"
+          allow_methods:
+            - "GET"
+            - "POST"
+            - "OPTIONS"
+          allow_headers:
+            - "Content-Type"
+            - "Authorization"
+          allow_credentials: true
+          max_age: 3600
+        created_at: "2024-01-01T00:00:00Z"
+        updated_at: "2024-01-01T00:00:00Z"
+
+      - id: route_static
+        name: Static Assets
+        description: Static file serving
+        path: "/static"
+        methods:
+          - "GET"
+        backend_id: backend_example_api
+        strip_path: false
+        preserve_host: true
+        caching:
+          enabled: true
+          ttl: "1h"
+          key: "$uri"
+          methods:
+            - "GET"
+          status_codes:
+            - 200
+        headers:
+          Cache-Control: "public, max-age=3600"
+          X-Content-Type: "static"
+        created_at: "2024-01-01T00:00:00Z"
+        updated_at: "2024-01-01T00:00:00Z"
+
+    created_at: "2024-01-01T00:00:00Z"
+    updated_at: "2024-01-01T00:00:00Z"
+
+global:
+  worker_processes: "auto"
+  worker_connections: 1024
+  keepalive_timeout: "65s"
+  client_max_body_size: "1m"
+  server_tokens: false
+  gzip: true
+  gzip_types:
+    - "text/plain"
+    - "text/css"
+    - "text/xml"
+    - "text/javascript"
+    - "application/xml+rss"
+    - "application/javascript"
+    - "application/json"
+    - "application/xml"
+    - "image/svg+xml"
