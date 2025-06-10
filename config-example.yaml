@@ -30,6 +30,16 @@ backends:
       falls: 3
     headers:
       X-Backend-Name: example-api
+    openapi:
+      enabled: true
+      endpoints:
+        - url: "http://10.0.1.10:8080/api-docs"
+          auth:
+            type: "bearer"
+            token: "your-api-token-here"
+        - url: "http://10.0.1.11:8080/swagger.json"
+          auth:
+            type: "none"
     created_at: "2024-01-01T00:00:00Z"
     updated_at: "2024-01-01T00:00:00Z"
 
@@ -46,6 +56,14 @@ backends:
         weight: 1
         backup: false
         down: false
+    openapi:
+      enabled: true
+      endpoints:
+        - url: "http://auth.internal.example.com:3000/api/docs"
+          auth:
+            type: "basic"
+            username: "admin"
+            password: "secure-password"
     created_at: "2024-01-01T00:00:00Z"
     updated_at: "2024-01-01T00:00:00Z"
 

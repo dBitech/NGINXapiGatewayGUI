@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>OpenAPI JavaScript Test</title>
+    <script>
+        // Simple test to verify the fixed JavaScript logic
+        async function testOpenAPIBackends() {
+            try {
+                const response = await fetch('/api/v1/openapi/backends');
+                const data = await response.json();
+                
+                console.log('API Response:', data);
+                console.log('Backends array:', data.backends);
+                console.log('Is backends an array?', Array.isArray(data.backends));
+                
+                if (data.backends && Array.isArray(data.backends)) {
+                    console.log('✅ Fix successful: backends is an array');
+                    data.backends.forEach((backend, index) => {
+                        console.log(`Backend ${index + 1}:`, {
+                            id: backend.id,
+                            name: backend.name,
+                            status: backend.openapi_status,
+                            lastFetched: backend.last_fetched
+                        });
+                    });
+                } else {
+                    console.log('❌ Issue: backends is not an array');
+                }
+                
+                document.getElementById('result').innerHTML = `
+                    <h3>Test Results</h3>
+                    <p><strong>Total backends:</strong> ${data.total_backends}</p>
+                    <p><strong>Enabled backends:</strong> ${data.enabled_backends}</p>
+                    <p><strong>Backends array length:</strong> ${data.backends ? data.backends.length : 'N/A'}</p>
+                    <p><strong>Status:</strong> ${Array.isArray(data.backends) ? '✅ Fix successful' : '❌ Still broken'}</p>
+                    <h4>Backend Details:</h4>
+                    <ul>
+                        ${data.backends.map(b => `<li>${b.name} (${b.id}) - Status: ${b.openapi_status}</li>`).join('')}
+                    </ul>
+                `;
+                
+            } catch (error) {
+                console.error('Test failed:', error);
+                document.getElementById('result').innerHTML = `<p style="color: red;">Test failed: ${error.message}</p>`;
+            }
+        }
+        
+        window.onload = testOpenAPIBackends;
+    </script>
+</head>
+<body>
+    <h1>OpenAPI JavaScript Fix Test</h1>
+    <p>This page tests the fixed JavaScript for OpenAPI backend loading.</p>
+    <div id="result">Loading...</div>
+</body>
+</html>
