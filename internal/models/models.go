@@ -9,6 +9,7 @@ type Backend struct {
 	Description string            `json:"description" yaml:"description"`
 	Servers     []BackendServer   `json:"servers" yaml:"servers"`
 	HealthCheck *HealthCheck      `json:"health_check,omitempty" yaml:"health_check,omitempty"`
+	OpenAPI     *OpenAPIConfig    `json:"openapi,omitempty" yaml:"openapi,omitempty"`
 	LoadBalance string            `json:"load_balance" yaml:"load_balance"` // round_robin, least_conn, ip_hash
 	MaxFails    int               `json:"max_fails" yaml:"max_fails"`
 	FailTimeout string            `json:"fail_timeout" yaml:"fail_timeout"`
@@ -190,4 +191,42 @@ type GlobalConfig struct {
 	ServerTokens      bool     `json:"server_tokens" yaml:"server_tokens"`
 	Gzip              bool     `json:"gzip" yaml:"gzip"`
 	GzipTypes         []string `json:"gzip_types" yaml:"gzip_types"`
+}
+
+// OpenAPIConfig represents OpenAPI/Swagger configuration for a backend
+type OpenAPIConfig struct {
+	Enabled     bool     `json:"enabled" yaml:"enabled"`
+	Endpoints   []string `json:"endpoints" yaml:"endpoints"`                         // e.g., ["/swagger.json", "/openapi.yaml"]
+	BasePath    string   `json:"base_path,omitempty" yaml:"base_path,omitempty"`     // Override base path
+	Title       string   `json:"title,omitempty" yaml:"title,omitempty"`             // Override service title
+	Description string   `json:"description,omitempty" yaml:"description,omitempty"` // Override description
+	Version     string   `json:"version,omitempty" yaml:"version,omitempty"`         // Override version
+	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`               // Custom tags to apply
+}
+
+// OpenAPISpec represents a fetched and parsed OpenAPI specification
+type OpenAPISpec struct {
+	BackendID  string                 `json:"backend_id"`
+	URL        string                 `json:"url"`
+	Version    string                 `json:"version"`         // "2.0" or "3.0.x"
+	Raw        map[string]interface{} `json:"raw"`             // Raw OpenAPI document
+	Paths      map[string]interface{} `json:"paths"`           // Extracted paths
+	Info       map[string]interface{} `json:"info"`            // API info
+	Components map[string]interface{} `json:"components"`      // Components/definitions
+	Tags       []interface{}          `json:"tags"`            // API tags
+	Servers    []interface{}          `json:"servers"`         // Server definitions
+	FetchedAt  time.Time              `json:"fetched_at"`      // When this spec was fetched
+	Error      string                 `json:"error,omitempty"` // Error message if fetch failed
+}
+
+// AggregatedOpenAPISpec represents the final unified OpenAPI specification
+type AggregatedOpenAPISpec struct {
+	OpenAPI     string                 `json:"openapi"`
+	Info        map[string]interface{} `json:"info"`
+	Servers     []interface{}          `json:"servers"`
+	Paths       map[string]interface{} `json:"paths"`
+	Components  map[string]interface{} `json:"components,omitempty"`
+	Tags        []interface{}          `json:"tags,omitempty"`
+	GeneratedAt time.Time              `json:"generated_at"`
+	Backends    []string               `json:"backends"` // List of backend IDs included
 }

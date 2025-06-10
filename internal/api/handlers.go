@@ -54,6 +54,7 @@ func SetupRoutes(r *gin.Engine, nginxMgr *nginx.Manager) {
 			routes.DELETE("/:id", deleteRoute(nginxMgr))
 		}
 
+
 		// Nginx cache management endpoints
 		cache := api.Group("/cache")
 		{
@@ -63,6 +64,15 @@ func SetupRoutes(r *gin.Engine, nginxMgr *nginx.Manager) {
 			cache.DELETE("/purge/zone/:zone", purgeNginxCacheZone(nginxMgr))
 			cache.GET("/stats", getNginxCacheStats(nginxMgr))
 			cache.POST("/warm", warmNginxCache(nginxMgr))
+    }
+		// OpenAPI aggregation endpoints
+		openapi := api.Group("/openapi")
+		{
+			openapi.GET("/aggregated", getAggregatedOpenAPI(nginxMgr))
+			openapi.POST("/refresh", refreshOpenAPICache(nginxMgr))
+			openapi.GET("/backends", getOpenAPIBackends(nginxMgr))
+			openapi.GET("/status", getOpenAPIStatus(nginxMgr))
+			openapi.GET("/swagger-ui", serveSwaggerUI(nginxMgr))
 		}
 
 		// Status endpoints
@@ -522,5 +532,196 @@ func warmNginxCache(nginxMgr *nginx.Manager) gin.HandlerFunc {
 			"urls":      req.URLs,
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
+  }
+}
+
+// OpenAPI handlers
+
+// getAggregatedOpenAPI returns the aggregated OpenAPI specification from all enabled backends
+func getAggregatedOpenAPI(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		aggregator := nginxMgr.GetOpenAPIAggregator()
+
+		// Get aggregated spec
+		aggregatedSpec, err := aggregator.GetAggregatedSpec()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to aggregate OpenAPI specifications",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		// Check if any specs were found
+		if aggregatedSpec == nil || len(aggregatedSpec.Paths) == 0 {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":   "No OpenAPI specifications found",
+				"message": "Ensure backends have OpenAPI enabled and accessible",
+			})
+			return
+		}
+
+		// Set content type for OpenAPI spec
+		c.Header("Content-Type", "application/json")
+		c.JSON(http.StatusOK, aggregatedSpec)
+	}
+}
+
+// refreshOpenAPICache forces a refresh of all cached OpenAPI specifications
+func refreshOpenAPICache(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		aggregator := nginxMgr.GetOpenAPIAggregator()
+
+		// Clear cache and force refresh
+		err := aggregator.RefreshCache()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "Failed to refresh OpenAPI cache",
+				"details": err.Error(),
+			})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":      "OpenAPI cache refreshed successfully",
+			"refreshed_at": time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+// getOpenAPIBackends returns a list of backends with their OpenAPI configuration status
+func getOpenAPIBackends(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		config := nginxMgr.GetConfiguration()
+		aggregator := nginxMgr.GetOpenAPIAggregator()
+
+		type BackendStatus struct {
+			models.Backend
+			OpenAPIStatus string     `json:"openapi_status"`
+			LastFetched   *time.Time `json:"last_fetched,omitempty"`
+			Error         string     `json:"error,omitempty"`
+		}
+
+		var backendStatuses []BackendStatus
+
+		for _, backend := range config.Backends {
+			status := BackendStatus{
+				Backend:       backend,
+				OpenAPIStatus: "disabled",
+			}
+
+			if backend.OpenAPI != nil && backend.OpenAPI.Enabled {
+				status.OpenAPIStatus = "enabled"
+
+				// Get cached spec info
+				if spec := aggregator.GetCachedSpec(backend.ID); spec != nil {
+					status.LastFetched = &spec.FetchedAt
+					if spec.Error != "" {
+						status.Error = spec.Error
+						status.OpenAPIStatus = "error"
+					} else if spec.Raw != nil {
+						status.OpenAPIStatus = "available"
+					}
+				}
+			}
+
+			backendStatuses = append(backendStatuses, status)
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"backends":         backendStatuses,
+			"total_backends":   len(config.Backends),
+			"enabled_backends": countEnabledOpenAPIBackends(config.Backends),
+		})
+	}
+}
+
+// getOpenAPIStatus returns the current status of the OpenAPI aggregation service
+func getOpenAPIStatus(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		config := nginxMgr.GetConfiguration()
+		aggregator := nginxMgr.GetOpenAPIAggregator()
+
+		// Count backends by status
+		totalBackends := len(config.Backends)
+		enabledBackends := countEnabledOpenAPIBackends(config.Backends)
+
+		// Get aggregation status
+		stats := aggregator.GetStats()
+
+		response := gin.H{
+			"service_status":     "running",
+			"cache_ttl_minutes":  int(aggregator.GetCacheTTL().Minutes()),
+			"last_refresh":       stats["LastRefresh"],
+			"total_backends":     totalBackends,
+			"enabled_backends":   enabledBackends,
+			"cached_specs":       stats["CachedSpecs"],
+			"successful_fetches": stats["SuccessfulFetches"],
+			"failed_fetches":     stats["FailedFetches"],
+		}
+
+		c.JSON(http.StatusOK, response)
+	}
+}
+
+// Helper functions
+
+func countEnabledOpenAPIBackends(backends []models.Backend) int {
+	count := 0
+	for _, backend := range backends {
+		if backend.OpenAPI != nil && backend.OpenAPI.Enabled {
+			count++
+		}
+	}
+	return count
+}
+
+// serveSwaggerUI serves a standalone Swagger UI page for the aggregated OpenAPI specification
+func serveSwaggerUI(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		swaggerHTML := `<!DOCTYPE html>
+<html>
+<head>
+	<title>API Gateway - Swagger UI</title>
+	<link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui.css" />
+	<style>
+		html { box-sizing: border-box; overflow: -moz-scrollbars-vertical; overflow-y: scroll; }
+		*, *:before, *:after { box-sizing: inherit; }
+		body { margin:0; background: #fafafa; }
+		.swagger-ui .topbar { display: none; }
+	</style>
+</head>
+<body>
+	<div id="swagger-ui"></div>
+	<script src="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui-bundle.js"></script>
+	<script src="https://unpkg.com/swagger-ui-dist@4.15.5/swagger-ui-standalone-preset.js"></script>
+	<script>
+		window.onload = function() {
+			SwaggerUIBundle({
+				url: '/api/v1/openapi/aggregated',
+				dom_id: '#swagger-ui',
+				deepLinking: true,
+				presets: [
+					SwaggerUIBundle.presets.apis,
+					SwaggerUIStandalonePreset
+				],
+				plugins: [
+					SwaggerUIBundle.plugins.DownloadUrl
+				],
+				layout: "StandaloneLayout",
+				validatorUrl: null,
+				docExpansion: "list",
+				filter: true,
+				showRequestHeaders: true,
+				showExtensions: true,
+				showCommonExtensions: true
+			});
+		};
+	</script>
+</body>
+</html>`
+
+		c.Header("Content-Type", "text/html")
+		c.String(http.StatusOK, swaggerHTML)
 	}
 }

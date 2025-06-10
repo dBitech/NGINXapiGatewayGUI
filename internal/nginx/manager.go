@@ -9,6 +9,7 @@ import (
 
 	"go-apigateway-gui/internal/cache"
 	"go-apigateway-gui/internal/models"
+	"go-apigateway-gui/internal/openapi"
 
 	"github.com/flosch/pongo2/v6"
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,7 @@ type Manager struct {
 	apiGatewayConfigPath string
 	config               *models.Configuration
 	cacheManager         *cache.Manager
+	openAPIAggregator    *openapi.Aggregator
 }
 
 func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath string) *Manager {
@@ -33,7 +35,6 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		apiGatewayConfigPath: apiGatewayConfigPath,
 		config:               &models.Configuration{},
 	}
-
 	// Initialize cache manager with default settings
 	mgr.cacheManager = cache.NewManager(
 		"http://localhost",     // nginx base URL (will be configurable)
@@ -42,6 +43,8 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		mgr.config,
 	)
 
+	// Initialize OpenAPI aggregator with default 5-minute cache TTL
+	mgr.openAPIAggregator = openapi.NewAggregator(mgr.config, 5*time.Minute)
 	return mgr
 }
 
@@ -89,6 +92,9 @@ func (m *Manager) SaveConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
+
+	// Update OpenAPI aggregator configuration
+	m.UpdateOpenAPIAggregatorConfig()
 
 	return nil
 }
@@ -393,6 +399,7 @@ func (m *Manager) GetServer(id string) (*models.Server, error) {
 	return nil, fmt.Errorf("server with ID %s not found", id)
 }
 
+
 // GetCacheManager returns the cache manager instance
 func (m *Manager) GetCacheManager() *cache.Manager {
 	return m.cacheManager
@@ -403,6 +410,15 @@ func (m *Manager) UpdateCacheManagerConfig() {
 	if m.cacheManager != nil {
 		m.cacheManager.UpdateConfiguration(m.config)
 	}
+}
+  // GetOpenAPIAggregator returns the OpenAPI aggregator instance
+func (m *Manager) GetOpenAPIAggregator() *openapi.Aggregator {
+	return m.openAPIAggregator
+}
+
+// UpdateOpenAPIAggregatorConfig updates the aggregator's configuration reference
+func (m *Manager) UpdateOpenAPIAggregatorConfig() {
+	m.openAPIAggregator.UpdateConfiguration(m.config)
 }
 
 // generateID generates a unique ID
