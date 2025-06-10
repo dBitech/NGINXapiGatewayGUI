@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"go-apigateway-gui/internal/models"
 	"go-apigateway-gui/internal/nginx"
@@ -51,6 +52,17 @@ func SetupRoutes(r *gin.Engine, nginxMgr *nginx.Manager) {
 			routes.GET("/:id", getRoute(nginxMgr))
 			routes.PUT("/:id", updateRoute(nginxMgr))
 			routes.DELETE("/:id", deleteRoute(nginxMgr))
+		}
+
+		// Nginx cache management endpoints
+		cache := api.Group("/cache")
+		{
+			cache.DELETE("/purge", purgeNginxCache(nginxMgr))
+			cache.DELETE("/purge/url", purgeNginxCacheURL(nginxMgr))
+			cache.DELETE("/purge/backend/:id", purgeNginxCacheBackend(nginxMgr))
+			cache.DELETE("/purge/zone/:zone", purgeNginxCacheZone(nginxMgr))
+			cache.GET("/stats", getNginxCacheStats(nginxMgr))
+			cache.POST("/warm", warmNginxCache(nginxMgr))
 		}
 
 		// Status endpoints
@@ -401,5 +413,114 @@ func getStatus(nginxMgr *nginx.Manager) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, response)
+	}
+}
+
+// purgeNginxCacheHandler handles cache purge requests
+func purgeNginxCache(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cacheManager := nginxMgr.GetCacheManager()
+		if err := cacheManager.PurgeAll(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Nginx cache purged successfully",
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+// purgeNginxCacheURLHandler handles cache purge by URL
+func purgeNginxCacheURL(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			URL string `json:"url" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		cacheManager := nginxMgr.GetCacheManager()
+		if err := cacheManager.PurgeURL(req.URL); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cache purged for URL: " + req.URL,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+// purgeNginxCacheBackendHandler handles cache purge by backend ID
+func purgeNginxCacheBackend(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		backendID := c.Param("id")
+
+		cacheManager := nginxMgr.GetCacheManager()
+		if err := cacheManager.PurgeBackend(backendID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cache purged for backend ID: " + backendID,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+// purgeNginxCacheZoneHandler handles cache purge by zone
+func purgeNginxCacheZone(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		zone := c.Param("zone")
+
+		cacheManager := nginxMgr.GetCacheManager()
+		if err := cacheManager.PurgeZone(zone); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cache purged for zone: " + zone,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
+	}
+}
+
+// getNginxCacheStatsHandler returns cache statistics
+func getNginxCacheStats(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cacheManager := nginxMgr.GetCacheManager()
+		stats, err := cacheManager.GetStats()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, stats)
+	}
+}
+
+// warmNginxCacheHandler warms up the cache with specified URLs
+func warmNginxCache(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			URLs []string `json:"urls" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		cacheManager := nginxMgr.GetCacheManager()
+		if err := cacheManager.WarmCache(req.URLs); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message":   "Cache warming initiated",
+			"urls":      req.URLs,
+			"timestamp": time.Now().Format(time.RFC3339),
+		})
 	}
 }

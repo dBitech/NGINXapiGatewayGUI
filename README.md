@@ -16,12 +16,23 @@ A web-based GUI for managing nginx configurations with a focus on API gateway fu
 - **Load Balancing**: Round-robin, least connections, and IP hash algorithms
 - **Rate Limiting**: Configurable request rate limits per route
 - **Response Caching**: Intelligent caching with custom TTL and cache keys
+- **Cache Management**: Advanced cache invalidation and warming capabilities
 - **CORS Support**: Cross-origin resource sharing configuration
 - **SSL/TLS**: SSL certificate management and HTTPS redirection
 - **Health Monitoring**: Backend server health checks (nginx-plus required)
 - **Authentication**: Basic auth, JWT, and API key authentication options
 - **Regex Pattern Matching**: Advanced location matching using regular expressions with nginx modifiers
 - **URL Rewriting**: Multiple rewrite rules per route with capture groups and various flags
+
+### Cache Management Features
+- **Cache Invalidation**: Purge entire cache, specific URL patterns, or backend-specific caches
+- **Cache Zones**: Support for multiple nginx cache zones with zone-specific purging
+- **Cache Statistics**: Real-time cache metrics including size, file count, and hit/miss ratios
+- **Cache Warming**: Pre-populate cache with frequently accessed URLs
+- **Backend Cache Integration**: Automatically purge cache when backend configurations change
+- **nginx-cache-purge Module**: Native integration with nginx cache purge module for optimal performance
+- **Web UI Integration**: Intuitive cache management interface with one-click purge operations
+- **API Endpoints**: RESTful API for programmatic cache management and automation
 
 ### Template System
 - **External Jinja2 Templates**: Use external Jinja2 templates instead of hardcoded configurations

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"go-apigateway-gui/internal/cache"
 	"go-apigateway-gui/internal/models"
 
 	"github.com/flosch/pongo2/v6"
@@ -20,10 +21,11 @@ type Manager struct {
 	templatesPath        string
 	apiGatewayConfigPath string
 	config               *models.Configuration
+	cacheManager         *cache.Manager
 }
 
 func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath string) *Manager {
-	return &Manager{
+	mgr := &Manager{
 		configPath:           configPath,
 		executablePath:       executablePath,
 		backupPath:           "./backups",
@@ -31,6 +33,16 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		apiGatewayConfigPath: apiGatewayConfigPath,
 		config:               &models.Configuration{},
 	}
+
+	// Initialize cache manager with default settings
+	mgr.cacheManager = cache.NewManager(
+		"http://localhost",     // nginx base URL (will be configurable)
+		"/var/cache/nginx",     // default cache path (will be configurable)
+		[]string{"cache_zone"}, // default cache zones (will be dynamic)
+		mgr.config,
+	)
+
+	return mgr
 }
 
 // LoadConfiguration loads the current configuration from YAML file
@@ -379,6 +391,18 @@ func (m *Manager) GetServer(id string) (*models.Server, error) {
 		}
 	}
 	return nil, fmt.Errorf("server with ID %s not found", id)
+}
+
+// GetCacheManager returns the cache manager instance
+func (m *Manager) GetCacheManager() *cache.Manager {
+	return m.cacheManager
+}
+
+// UpdateCacheManagerConfig updates the cache manager's configuration reference
+func (m *Manager) UpdateCacheManagerConfig() {
+	if m.cacheManager != nil {
+		m.cacheManager.UpdateConfiguration(m.config)
+	}
 }
 
 // generateID generates a unique ID

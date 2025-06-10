@@ -47,6 +47,14 @@ http {
                      inactive=60m use_temp_path=off;
     proxy_temp_path /var/cache/nginx/temp;
 
+    # Cache purge configuration (nginx-cache-purge module)
+    # Allow cache purge from localhost only for security
+    geo $purge_allowed {
+        default 0;
+        127.0.0.1 1;
+        ::1 1;
+    }
+
     # Upstream backends
     {% for backend in Backends %}
     upstream {{ backend.ID }} {
@@ -99,6 +107,14 @@ http {
         {% for header_name, header_value in server.Headers.items() %}
         add_header {{ header_name }} "{{ header_value }}" always;
         {% endfor %}
+
+        # Cache purge endpoint (nginx-cache-purge module)
+        location ~ /api/v1/cache/purge(/.*) {
+            if ($purge_allowed = 0) {
+                return 403 "Cache purge not allowed from this IP";
+            }
+            proxy_cache_purge cache_zone $1$is_args$args;
+        }
 
         # Routes
         {% for route in server.Routes %}

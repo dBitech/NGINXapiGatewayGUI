@@ -199,6 +199,11 @@ function renderBackends(backends) {
                                 <small>Interval: ${backend.health_check.interval || '30s'}</small>
                             </div>` : ''
                         }
+                        <div class="mt-3 d-grid">
+                            <button class="btn btn-outline-warning btn-sm" onclick="purgeBackendCache('${backend.id}')">
+                                <i class="fas fa-trash me-1"></i>Purge Cache
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
