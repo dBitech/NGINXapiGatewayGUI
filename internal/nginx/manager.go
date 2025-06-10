@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"go-apigateway-gui/internal/cache"
 	"go-apigateway-gui/internal/models"
 	"go-apigateway-gui/internal/openapi"
 
@@ -21,6 +22,7 @@ type Manager struct {
 	templatesPath        string
 	apiGatewayConfigPath string
 	config               *models.Configuration
+	cacheManager         *cache.Manager
 	openAPIAggregator    *openapi.Aggregator
 }
 
@@ -33,6 +35,14 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		apiGatewayConfigPath: apiGatewayConfigPath,
 		config:               &models.Configuration{},
 	}
+	// Initialize cache manager with default settings
+	mgr.cacheManager = cache.NewManager(
+		"http://localhost",     // nginx base URL (will be configurable)
+		"/var/cache/nginx",     // default cache path (will be configurable)
+		[]string{"cache_zone"}, // default cache zones (will be dynamic)
+		mgr.config,
+	)
+
 	// Initialize OpenAPI aggregator with default 5-minute cache TTL
 	mgr.openAPIAggregator = openapi.NewAggregator(mgr.config, 5*time.Minute)
 	return mgr
@@ -389,7 +399,19 @@ func (m *Manager) GetServer(id string) (*models.Server, error) {
 	return nil, fmt.Errorf("server with ID %s not found", id)
 }
 
-// GetOpenAPIAggregator returns the OpenAPI aggregator instance
+
+// GetCacheManager returns the cache manager instance
+func (m *Manager) GetCacheManager() *cache.Manager {
+	return m.cacheManager
+}
+
+// UpdateCacheManagerConfig updates the cache manager's configuration reference
+func (m *Manager) UpdateCacheManagerConfig() {
+	if m.cacheManager != nil {
+		m.cacheManager.UpdateConfiguration(m.config)
+	}
+}
+  // GetOpenAPIAggregator returns the OpenAPI aggregator instance
 func (m *Manager) GetOpenAPIAggregator() *openapi.Aggregator {
 	return m.openAPIAggregator
 }
