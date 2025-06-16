@@ -49,8 +49,12 @@
                             <a class="nav-link" href="#" data-section="routes">
                                 <i class="fas fa-route me-2"></i>Routes
                             </a>
+                            <a class="nav-link" href="#" data-section="certificates">
+                                <i class="fas fa-certificate me-2"></i>SSL Certificates
+                            </a>
                             <a class="nav-link" href="#" data-section="cache">
                                 <i class="fas fa-database me-2"></i>Cache Management
+                            </a>
                             <a class="nav-link" href="#" data-section="openapi">
                                 <i class="fas fa-file-code me-2"></i>OpenAPI
                             </a>
@@ -220,6 +224,85 @@
                       </div>
                     </div>
                 </div>
+
+                <!-- SSL Certificate Management Section -->
+                <div id="certificates-section" class="section" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h2>SSL Certificate Management</h2>
+                        <div class="btn-group">
+                            <button class="btn btn-outline-primary" onclick="loadCertificates()">
+                                <i class="fas fa-sync me-2"></i>Refresh
+                            </button>
+                            <button class="btn btn-success" onclick="showObtainCertificateModal()">
+                                <i class="fas fa-plus me-2"></i>Obtain Certificate
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Certificate Statistics -->
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="fas fa-certificate fa-3x text-success mb-3"></i>
+                                    <h3 id="total-certificates">0</h3>
+                                    <p class="text-muted">Total Certificates</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="fas fa-check-circle fa-3x text-success mb-3"></i>
+                                    <h3 id="valid-certificates">0</h3>
+                                    <p class="text-muted">Valid</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="fas fa-exclamation-triangle fa-3x text-warning mb-3"></i>
+                                    <h3 id="expiring-certificates">0</h3>
+                                    <p class="text-muted">Expiring Soon</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="card text-center">
+                                <div class="card-body">
+                                    <i class="fas fa-times-circle fa-3x text-danger mb-3"></i>
+                                    <h3 id="expired-certificates">0</h3>
+                                    <p class="text-muted">Expired</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Certificate List -->
+                    <div class="row">
+                        <div class="col-12">
+                            <div class="card">
+                                <div class="card-header">
+                                    <h5 class="card-title mb-0">
+                                        <i class="fas fa-list me-2"></i>Managed Certificates
+                                    </h5>
+                                </div>
+                                <div class="card-body">
+                                    <div id="certificates-content">
+                                        <div class="text-center py-4">
+                                            <div class="spinner-border" role="status">
+                                                <span class="visually-hidden">Loading...</span>
+                                            </div>
+                                            <p class="mt-2">Loading certificates...</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- OpenAPI Section -->
                 <div id="openapi-section" class="section" style="display: none;">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -249,16 +332,6 @@
                                                 <span class="visually-hidden">Loading...</span>
                                             </div>
                                             <p class="mt-2 text-muted">Loading cache statistics...</p>
-                                        <i class="fas fa-info-circle me-2"></i>Service Status
-                                    </h5>
-                                </div>
-                                <div class="card-body">
-                                    <div id="openapi-status-content">
-                                        <div class="text-center py-3">
-                                            <div class="spinner-border" role="status">
-                                                <span class="visually-hidden">Loading...</span>
-                                            </div>
-                                            <p class="mt-2">Loading OpenAPI status...</p>
                                         </div>
                                     </div>
                                 </div>
@@ -1118,6 +1191,123 @@
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
                     <button type="button" class="btn btn-success" onclick="confirmWarmCache()">Start Warming</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Obtain Certificate Modal -->
+    <div class="modal fade" id="obtainCertificateModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Obtain SSL Certificate</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="obtain-certificate-form">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Server</label>
+                                    <select class="form-select" id="cert-server-id" required>
+                                        <option value="">Select a server...</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label class="form-label">Email Address</label>
+                                    <input type="email" class="form-control" id="cert-email" placeholder="your@email.com" required>
+                                    <div class="form-text">Required for ACME account registration</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Domain Names</label>
+                            <textarea class="form-control" id="cert-domains" rows="3" 
+                                      placeholder="example.com&#10;www.example.com&#10;api.example.com" required></textarea>
+                            <div class="form-text">Enter one domain per line. First domain will be the common name.</div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Provider</label>
+                                    <select class="form-select" id="cert-provider">
+                                        <option value="letsencrypt">Let's Encrypt</option>
+                                        <option value="buypass">Buypass</option>
+                                        <option value="zerossl">ZeroSSL</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Environment</label>
+                                    <select class="form-select" id="cert-environment">
+                                        <option value="staging">Staging (Testing)</option>
+                                        <option value="production">Production</option>
+                                    </select>
+                                    <div class="form-text">Use staging for testing to avoid rate limits</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">Challenge Type</label>
+                                    <select class="form-select" id="cert-challenge">
+                                        <option value="http-01">HTTP-01 (Recommended)</option>
+                                        <option value="dns-01">DNS-01</option>
+                                        <option value="tls-alpn-01">TLS-ALPN-01</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            <strong>HTTP-01 Challenge:</strong> Your server must be accessible from the internet on port 80.
+                            The ACME provider will verify domain ownership by placing a file at a specific URL.
+                        </div>
+
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Important:</strong> Make sure your domains point to this server and port 80 is accessible
+                            before obtaining a certificate.
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-success" onclick="confirmObtainCertificate()">
+                        <i class="fas fa-certificate me-2"></i>Obtain Certificate
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Certificate Details Modal -->
+    <div class="modal fade" id="certificateDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Certificate Details</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="certificate-details-content">
+                        <!-- Certificate details will be loaded here -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-warning" onclick="renewCertificateFromModal()">
+                        <i class="fas fa-sync me-2"></i>Renew Certificate
+                    </button>
+                    <button type="button" class="btn btn-danger" onclick="removeCertificateFromModal()">
+                        <i class="fas fa-trash me-2"></i>Remove Configuration
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
         </div>

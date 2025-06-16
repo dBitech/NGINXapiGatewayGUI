@@ -54,7 +54,6 @@ func SetupRoutes(r *gin.Engine, nginxMgr *nginx.Manager) {
 			routes.DELETE("/:id", deleteRoute(nginxMgr))
 		}
 
-
 		// Nginx cache management endpoints
 		cache := api.Group("/cache")
 		{
@@ -64,7 +63,19 @@ func SetupRoutes(r *gin.Engine, nginxMgr *nginx.Manager) {
 			cache.DELETE("/purge/zone/:zone", purgeNginxCacheZone(nginxMgr))
 			cache.GET("/stats", getNginxCacheStats(nginxMgr))
 			cache.POST("/warm", warmNginxCache(nginxMgr))
-    }
+		}
+
+		// Certificate management endpoints
+		certificates := api.Group("/certificates")
+		{
+			certificates.GET("", listCertificates(nginxMgr))
+			certificates.POST("/obtain/:serverid", obtainCertificate(nginxMgr))
+			certificates.POST("/renew/:serverid", renewCertificate(nginxMgr))
+			certificates.GET("/:serverid", getCertificateInfo(nginxMgr))
+			certificates.DELETE("/:serverid", removeCertificateConfig(nginxMgr))
+			certificates.GET("/:serverid/status", getCertificateStatus(nginxMgr))
+		}
+
 		// OpenAPI aggregation endpoints
 		openapi := api.Group("/openapi")
 		{
@@ -532,148 +543,193 @@ func warmNginxCache(nginxMgr *nginx.Manager) gin.HandlerFunc {
 			"urls":      req.URLs,
 			"timestamp": time.Now().Format(time.RFC3339),
 		})
-  }
+	}
 }
 
-// OpenAPI handlers
+// Certificate Management Handlers
+
+// Certificate request structure
+type ObtainCertificateRequest struct {
+	Email         string   `json:"email" binding:"required"`
+	Domains       []string `json:"domains" binding:"required"`
+	Provider      string   `json:"provider"`       // "letsencrypt", "buypass", "zerossl"
+	Environment   string   `json:"environment"`    // "staging", "production"
+	ChallengeType string   `json:"challenge_type"` // "http-01", "dns-01", "tls-alpn-01"
+}
+
+// Certificate information response
+type CertificateResponse struct {
+	ServerID      string     `json:"server_id"`
+	Domains       []string   `json:"domains"`
+	Provider      string     `json:"provider"`
+	Environment   string     `json:"environment"`
+	NeedsRenewal  bool       `json:"needs_renewal"`
+	ChallengeType string     `json:"challenge_type"`
+	IssuedAt      *time.Time `json:"issued_at,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+}
+
+// listCertificates returns all managed certificates
+func listCertificates(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		certificates, err := nginxMgr.ListManagedCertificates()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"certificates": certificates})
+	}
+}
+
+// obtainCertificate requests a new certificate for a server
+func obtainCertificate(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serverID := c.Param("serverid")
+		if serverID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+			return
+		}
+
+		var req ObtainCertificateRequest
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Create ACME configuration
+		acmeConfig := &models.ACMEConfig{
+			Enabled:       true,
+			Provider:      req.Provider,
+			Environment:   req.Environment,
+			Email:         req.Email,
+			Domains:       req.Domains,
+			ChallengeType: req.ChallengeType,
+			RenewDays:     30,
+			CheckInterval: "24h",
+		}
+
+		if err := nginxMgr.EnableACMEForServer(serverID, acmeConfig); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Certificate obtained successfully"})
+	}
+}
+
+// renewCertificate renews an existing certificate
+func renewCertificate(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serverID := c.Param("serverid")
+		if serverID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+			return
+		}
+
+		certMgr := nginxMgr.GetCertificateManager()
+		if err := certMgr.RenewCertificate(serverID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Certificate renewed successfully"})
+	}
+}
+
+// getCertificateInfo returns information about a certificate
+func getCertificateInfo(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serverID := c.Param("serverid")
+		if serverID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+			return
+		}
+
+		certInfo, err := nginxMgr.GetCertificateInfo(serverID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, certInfo)
+	}
+}
+
+// removeCertificateConfig removes ACME configuration for a server
+func removeCertificateConfig(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serverID := c.Param("serverid")
+		if serverID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+			return
+		}
+
+		if err := nginxMgr.DisableACMEForServer(serverID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Certificate configuration removed successfully"})
+	}
+}
+
+// getCertificateStatus returns the status of a certificate
+func getCertificateStatus(nginxMgr *nginx.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		serverID := c.Param("serverid")
+		if serverID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+			return
+		}
+
+		certMgr := nginxMgr.GetCertificateManager()
+		certInfo, err := certMgr.GetCertificateInfo(serverID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+
+		status := gin.H{
+			"server_id":      certInfo.ServerID,
+			"domains":        certInfo.Domains,
+			"needs_renewal":  certInfo.NeedsRenewal,
+			"provider":       certInfo.Provider,
+			"environment":    certInfo.Environment,
+			"challenge_type": certInfo.ChallengeType,
+		}
+
+		c.JSON(http.StatusOK, status)
+	}
+}
+
+// OpenAPI handlers (temporarily disabled - not implemented)
 
 // getAggregatedOpenAPI returns the aggregated OpenAPI specification from all enabled backends
 func getAggregatedOpenAPI(nginxMgr *nginx.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		aggregator := nginxMgr.GetOpenAPIAggregator()
-
-		// Get aggregated spec
-		aggregatedSpec, err := aggregator.GetAggregatedSpec()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to aggregate OpenAPI specifications",
-				"details": err.Error(),
-			})
-			return
-		}
-
-		// Check if any specs were found
-		if aggregatedSpec == nil || len(aggregatedSpec.Paths) == 0 {
-			c.JSON(http.StatusNotFound, gin.H{
-				"error":   "No OpenAPI specifications found",
-				"message": "Ensure backends have OpenAPI enabled and accessible",
-			})
-			return
-		}
-
-		// Set content type for OpenAPI spec
-		c.Header("Content-Type", "application/json")
-		c.JSON(http.StatusOK, aggregatedSpec)
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "OpenAPI aggregation not yet implemented"})
 	}
 }
 
 // refreshOpenAPICache forces a refresh of all cached OpenAPI specifications
 func refreshOpenAPICache(nginxMgr *nginx.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		aggregator := nginxMgr.GetOpenAPIAggregator()
-
-		// Clear cache and force refresh
-		err := aggregator.RefreshCache()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Failed to refresh OpenAPI cache",
-				"details": err.Error(),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message":      "OpenAPI cache refreshed successfully",
-			"refreshed_at": time.Now().Format(time.RFC3339),
-		})
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "OpenAPI cache refresh not yet implemented"})
 	}
 }
 
 // getOpenAPIBackends returns a list of backends with their OpenAPI configuration status
 func getOpenAPIBackends(nginxMgr *nginx.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		config := nginxMgr.GetConfiguration()
-		aggregator := nginxMgr.GetOpenAPIAggregator()
-
-		type BackendStatus struct {
-			models.Backend
-			OpenAPIStatus string     `json:"openapi_status"`
-			LastFetched   *time.Time `json:"last_fetched,omitempty"`
-			Error         string     `json:"error,omitempty"`
-		}
-
-		var backendStatuses []BackendStatus
-
-		for _, backend := range config.Backends {
-			status := BackendStatus{
-				Backend:       backend,
-				OpenAPIStatus: "disabled",
-			}
-
-			if backend.OpenAPI != nil && backend.OpenAPI.Enabled {
-				status.OpenAPIStatus = "enabled"
-
-				// Get cached spec info
-				if spec := aggregator.GetCachedSpec(backend.ID); spec != nil {
-					status.LastFetched = &spec.FetchedAt
-					if spec.Error != "" {
-						status.Error = spec.Error
-						status.OpenAPIStatus = "error"
-					} else if spec.Raw != nil {
-						status.OpenAPIStatus = "available"
-					}
-				}
-			}
-
-			backendStatuses = append(backendStatuses, status)
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"backends":         backendStatuses,
-			"total_backends":   len(config.Backends),
-			"enabled_backends": countEnabledOpenAPIBackends(config.Backends),
-		})
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "OpenAPI backends listing not yet implemented"})
 	}
 }
 
-// getOpenAPIStatus returns the current status of the OpenAPI aggregation service
+// getOpenAPIStatus returns the overall status of OpenAPI aggregation
 func getOpenAPIStatus(nginxMgr *nginx.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		config := nginxMgr.GetConfiguration()
-		aggregator := nginxMgr.GetOpenAPIAggregator()
-
-		// Count backends by status
-		totalBackends := len(config.Backends)
-		enabledBackends := countEnabledOpenAPIBackends(config.Backends)
-
-		// Get aggregation status
-		stats := aggregator.GetStats()
-
-		response := gin.H{
-			"service_status":     "running",
-			"cache_ttl_minutes":  int(aggregator.GetCacheTTL().Minutes()),
-			"last_refresh":       stats["LastRefresh"],
-			"total_backends":     totalBackends,
-			"enabled_backends":   enabledBackends,
-			"cached_specs":       stats["CachedSpecs"],
-			"successful_fetches": stats["SuccessfulFetches"],
-			"failed_fetches":     stats["FailedFetches"],
-		}
-
-		c.JSON(http.StatusOK, response)
+		c.JSON(http.StatusNotImplemented, gin.H{"error": "OpenAPI status not yet implemented"})
 	}
-}
-
-// Helper functions
-
-func countEnabledOpenAPIBackends(backends []models.Backend) int {
-	count := 0
-	for _, backend := range backends {
-		if backend.OpenAPI != nil && backend.OpenAPI.Enabled {
-			count++
-		}
-	}
-	return count
 }
 
 // serveSwaggerUI serves a standalone Swagger UI page for the aggregated OpenAPI specification

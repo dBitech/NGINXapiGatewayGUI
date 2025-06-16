@@ -58,6 +58,12 @@ function showSection(section) {
         case 'routes':
             loadServersForRoutes();
             break;
+        case 'certificates':
+            loadCertificates();
+            break;
+        case 'cache':
+            loadCacheStats();
+            break;
         case 'openapi':
             loadOpenAPISection();
             break;
@@ -1834,3 +1840,320 @@ document.addEventListener('DOMContentLoaded', function() {
         authTypeSelect.addEventListener('change', toggleOpenAPIAuth);
     }
 });
+
+// =============================================
+// Certificate Management Functions
+// =============================================
+
+// Load certificates from the API
+async function loadCertificates() {
+    try {
+        const response = await apiCall('GET', '/certificates');
+        const certificates = response.certificates || [];
+        
+        renderCertificates(certificates);
+        updateCertificateStats(certificates);
+    } catch (error) {
+        document.getElementById('certificates-content').innerHTML = 
+            '<div class="alert alert-danger">Failed to load certificates: ' + error.message + '</div>';
+    }
+}
+
+// Render certificates in the UI
+function renderCertificates(certificates) {
+    const container = document.getElementById('certificates-content');
+    
+    if (certificates.length === 0) {
+        container.innerHTML = `
+            <div class="text-center py-4">
+                <i class="fas fa-certificate fa-3x text-muted mb-3"></i>
+                <h5>No certificates found</h5>
+                <p class="text-muted">Click "Obtain Certificate" to get started with automatic SSL certificates.</p>
+                <button class="btn btn-success" onclick="showObtainCertificateModal()">
+                    <i class="fas fa-plus me-2"></i>Obtain Your First Certificate
+                </button>
+            </div>
+        `;
+        return;
+    }
+    
+    const html = certificates.map(cert => {
+        const statusClass = cert.needs_renewal ? 'warning' : 'success';
+        const statusIcon = cert.needs_renewal ? 'exclamation-triangle' : 'check-circle';
+        const statusText = cert.needs_renewal ? 'Needs Renewal' : 'Valid';
+        
+        return `
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <h5 class="card-title mb-1">
+                                <i class="fas fa-certificate me-2"></i>
+                                ${cert.domains[0]}
+                            </h5>
+                            <p class="text-muted mb-2">
+                                <small>Server: ${cert.server_id}</small>
+                            </p>
+                            <div class="mb-2">
+                                ${cert.domains.map(domain => 
+                                    `<span class="badge bg-light text-dark me-1">${domain}</span>`
+                                ).join('')}
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <small class="text-muted">Provider</small>
+                            <div class="fw-bold">${cert.provider} (${cert.environment})</div>
+                            <small class="text-muted">Challenge: ${cert.challenge_type}</small>
+                        </div>
+                        <div class="col-md-2">
+                            <span class="badge bg-${statusClass} fs-6">
+                                <i class="fas fa-${statusIcon} me-1"></i>
+                                ${statusText}
+                            </span>
+                        </div>
+                        <div class="col-md-1">
+                            <div class="dropdown">
+                                <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" 
+                                        data-bs-toggle="dropdown">
+                                    <i class="fas fa-ellipsis-v"></i>
+                                </button>
+                                <ul class="dropdown-menu">
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="viewCertificateDetails('${cert.server_id}')">
+                                            <i class="fas fa-eye me-2"></i>View Details
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a class="dropdown-item" href="#" onclick="renewCertificate('${cert.server_id}')">
+                                            <i class="fas fa-sync me-2"></i>Renew Now
+                                        </a>
+                                    </li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li>
+                                        <a class="dropdown-item text-danger" href="#" onclick="removeCertificate('${cert.server_id}')">
+                                            <i class="fas fa-trash me-2"></i>Remove
+                                        </a>
+                                    </li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    container.innerHTML = html;
+}
+
+// Update certificate statistics
+function updateCertificateStats(certificates) {
+    const total = certificates.length;
+    const expiring = certificates.filter(cert => cert.needs_renewal).length;
+    const valid = total - expiring;
+    
+    document.getElementById('total-certificates').textContent = total;
+    document.getElementById('valid-certificates').textContent = valid;
+    document.getElementById('expiring-certificates').textContent = expiring;
+    document.getElementById('expired-certificates').textContent = 0; // TODO: Add expired count from API
+}
+
+// Show obtain certificate modal
+async function showObtainCertificateModal() {
+    try {
+        // Load servers for dropdown
+        const response = await apiCall('GET', '/servers');
+        const servers = response.servers || [];
+        
+        const select = document.getElementById('cert-server-id');
+        select.innerHTML = '<option value="">Select a server...</option>';
+        
+        servers.forEach(server => {
+            const option = document.createElement('option');
+            option.value = server.id;
+            option.textContent = `${server.name} (${server.server_name.join(', ')})`;
+            select.appendChild(option);
+        });
+        
+        // Reset form
+        document.getElementById('obtain-certificate-form').reset();
+        
+        const modal = new bootstrap.Modal(document.getElementById('obtainCertificateModal'));
+        modal.show();
+    } catch (error) {
+        showAlert('error', 'Failed to load servers: ' + error.message);
+    }
+}
+
+// Confirm obtain certificate
+async function confirmObtainCertificate() {
+    const form = document.getElementById('obtain-certificate-form');
+    if (!form.checkValidity()) {
+        form.reportValidity();
+        return;
+    }
+    
+    const serverID = document.getElementById('cert-server-id').value;
+    const email = document.getElementById('cert-email').value;
+    const domains = document.getElementById('cert-domains').value
+        .split('\n')
+        .map(d => d.trim())
+        .filter(d => d.length > 0);
+    const provider = document.getElementById('cert-provider').value;
+    const environment = document.getElementById('cert-environment').value;
+    const challengeType = document.getElementById('cert-challenge').value;
+    
+    if (domains.length === 0) {
+        showAlert('error', 'Please enter at least one domain name');
+        return;
+    }
+    
+    try {
+        showAlert('info', 'Obtaining certificate... This may take a few minutes.');
+        
+        await apiCall('POST', `/certificates/obtain/${serverID}`, {
+            email,
+            domains,
+            provider,
+            environment,
+            challenge_type: challengeType
+        });
+        
+        showAlert('success', 'Certificate obtained successfully!');
+        
+        // Close modal and refresh certificates
+        bootstrap.Modal.getInstance(document.getElementById('obtainCertificateModal')).hide();
+        loadCertificates();
+        
+    } catch (error) {
+        showAlert('error', 'Failed to obtain certificate: ' + error.message);
+    }
+}
+
+// View certificate details
+async function viewCertificateDetails(serverID) {
+    try {
+        const response = await apiCall('GET', `/certificates/${serverID}`);
+        
+        const html = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Certificate Information</h6>
+                    <table class="table table-sm">
+                        <tr>
+                            <td><strong>Server ID:</strong></td>
+                            <td>${response.server_id}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Provider:</strong></td>
+                            <td>${response.provider}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Environment:</strong></td>
+                            <td>${response.environment}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Challenge Type:</strong></td>
+                            <td>${response.challenge_type}</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Status:</strong></td>
+                            <td>
+                                <span class="badge bg-${response.needs_renewal ? 'warning' : 'success'}">
+                                    ${response.needs_renewal ? 'Needs Renewal' : 'Valid'}
+                                </span>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6>Domain Names</h6>
+                    <ul class="list-group">
+                        ${response.domains.map(domain => 
+                            `<li class="list-group-item">${domain}</li>`
+                        ).join('')}
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="mt-3">
+                <h6>File Locations</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <small class="text-muted">Certificate Path:</small>
+                        <code class="d-block">${response.cert_path}</code>
+                    </div>
+                    <div class="col-md-6">
+                        <small class="text-muted">Private Key Path:</small>
+                        <code class="d-block">${response.key_path}</code>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('certificate-details-content').innerHTML = html;
+        
+        // Store server ID for modal actions
+        document.getElementById('certificateDetailsModal').dataset.serverId = serverID;
+        
+        const modal = new bootstrap.Modal(document.getElementById('certificateDetailsModal'));
+        modal.show();
+        
+    } catch (error) {
+        showAlert('error', 'Failed to load certificate details: ' + error.message);
+    }
+}
+
+// Renew certificate
+async function renewCertificate(serverID) {
+    if (!confirm('Are you sure you want to renew this certificate?')) {
+        return;
+    }
+    
+    try {
+        showAlert('info', 'Renewing certificate... This may take a few minutes.');
+        
+        await apiCall('POST', `/certificates/renew/${serverID}`);
+        
+        showAlert('success', 'Certificate renewed successfully!');
+        loadCertificates();
+        
+    } catch (error) {
+        showAlert('error', 'Failed to renew certificate: ' + error.message);
+    }
+}
+
+// Remove certificate configuration
+async function removeCertificate(serverID) {
+    if (!confirm('Are you sure you want to remove this certificate configuration? The certificate files will remain but automatic management will be disabled.')) {
+        return;
+    }
+    
+    try {
+        await apiCall('DELETE', `/certificates/${serverID}`);
+        
+        showAlert('success', 'Certificate configuration removed successfully!');
+        loadCertificates();
+        
+    } catch (error) {
+        showAlert('error', 'Failed to remove certificate: ' + error.message);
+    }
+}
+
+// Renew certificate from modal
+function renewCertificateFromModal() {
+    const serverID = document.getElementById('certificateDetailsModal').dataset.serverId;
+    if (serverID) {
+        bootstrap.Modal.getInstance(document.getElementById('certificateDetailsModal')).hide();
+        renewCertificate(serverID);
+    }
+}
+
+// Remove certificate from modal
+function removeCertificateFromModal() {
+    const serverID = document.getElementById('certificateDetailsModal').dataset.serverId;
+    if (serverID) {
+        bootstrap.Modal.getInstance(document.getElementById('certificateDetailsModal')).hide();
+        removeCertificate(serverID);
+    }
+}

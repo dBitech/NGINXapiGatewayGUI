@@ -1,15 +1,16 @@
 package nginx
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
+	"go-apigateway-gui/internal/acme"
 	"go-apigateway-gui/internal/cache"
 	"go-apigateway-gui/internal/models"
-	"go-apigateway-gui/internal/openapi"
 
 	"github.com/flosch/pongo2/v6"
 	"gopkg.in/yaml.v3"
@@ -23,7 +24,8 @@ type Manager struct {
 	apiGatewayConfigPath string
 	config               *models.Configuration
 	cacheManager         *cache.Manager
-	openAPIAggregator    *openapi.Aggregator
+	certManager          *acme.CertificateManager
+	certDir              string
 }
 
 func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath string) *Manager {
@@ -34,7 +36,9 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		templatesPath:        templatesPath,
 		apiGatewayConfigPath: apiGatewayConfigPath,
 		config:               &models.Configuration{},
+		certDir:              "./certs", // Default certificate directory
 	}
+
 	// Initialize cache manager with default settings
 	mgr.cacheManager = cache.NewManager(
 		"http://localhost",     // nginx base URL (will be configurable)
@@ -43,8 +47,9 @@ func NewManager(configPath, executablePath, templatesPath, apiGatewayConfigPath 
 		mgr.config,
 	)
 
-	// Initialize OpenAPI aggregator with default 5-minute cache TTL
-	mgr.openAPIAggregator = openapi.NewAggregator(mgr.config, 5*time.Minute)
+	// Initialize certificate manager
+	mgr.certManager = acme.NewCertificateManager(mgr.certDir)
+
 	return mgr
 }
 
@@ -92,9 +97,6 @@ func (m *Manager) SaveConfiguration() error {
 	if err != nil {
 		return fmt.Errorf("failed to write config file: %w", err)
 	}
-
-	// Update OpenAPI aggregator configuration
-	m.UpdateOpenAPIAggregatorConfig()
 
 	return nil
 }
@@ -399,7 +401,6 @@ func (m *Manager) GetServer(id string) (*models.Server, error) {
 	return nil, fmt.Errorf("server with ID %s not found", id)
 }
 
-
 // GetCacheManager returns the cache manager instance
 func (m *Manager) GetCacheManager() *cache.Manager {
 	return m.cacheManager
@@ -410,15 +411,6 @@ func (m *Manager) UpdateCacheManagerConfig() {
 	if m.cacheManager != nil {
 		m.cacheManager.UpdateConfiguration(m.config)
 	}
-}
-  // GetOpenAPIAggregator returns the OpenAPI aggregator instance
-func (m *Manager) GetOpenAPIAggregator() *openapi.Aggregator {
-	return m.openAPIAggregator
-}
-
-// UpdateOpenAPIAggregatorConfig updates the aggregator's configuration reference
-func (m *Manager) UpdateOpenAPIAggregatorConfig() {
-	m.openAPIAggregator.UpdateConfiguration(m.config)
 }
 
 // generateID generates a unique ID
@@ -514,6 +506,203 @@ func (m *Manager) PreviewTemplate(templateName string) (string, error) {
 	}
 
 	return output, nil
+}
+
+// ACME Certificate Management Methods
+
+// StartCertificateManager starts the automatic certificate management
+func (m *Manager) StartCertificateManager(ctx context.Context) error {
+	if m.certManager == nil {
+		return fmt.Errorf("certificate manager not initialized")
+	}
+
+	// Update certificate manager with current server configurations
+	if err := m.updateCertificateConfigurations(); err != nil {
+		return fmt.Errorf("failed to update certificate configurations: %w", err)
+	}
+
+	return m.certManager.Start(ctx)
+}
+
+// StopCertificateManager stops the certificate manager
+func (m *Manager) StopCertificateManager() {
+	if m.certManager != nil {
+		m.certManager.Stop()
+	}
+}
+
+// updateCertificateConfigurations updates the certificate manager with current ACME configurations
+func (m *Manager) updateCertificateConfigurations() error {
+	if m.config == nil {
+		return fmt.Errorf("configuration not loaded")
+	}
+
+	for _, server := range m.config.Servers {
+		if server.SSL != nil && server.SSL.ACME != nil && server.SSL.ACME.Enabled {
+			if err := m.certManager.AddACMEConfig(server.ID, server.SSL.ACME); err != nil {
+				return fmt.Errorf("failed to add ACME config for server %s: %w", server.ID, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ObtainCertificate obtains a certificate for the specified server
+func (m *Manager) ObtainCertificate(serverID string) error {
+	if m.certManager == nil {
+		return fmt.Errorf("certificate manager not initialized")
+	}
+
+	if err := m.certManager.ObtainCertificate(serverID); err != nil {
+		return fmt.Errorf("failed to obtain certificate for server %s: %w", serverID, err)
+	}
+
+	// Update server SSL configuration with certificate paths
+	if err := m.updateServerCertificatePaths(serverID); err != nil {
+		return fmt.Errorf("failed to update certificate paths: %w", err)
+	}
+
+	// Regenerate nginx configuration and reload
+	if err := m.GenerateNginxConfig(); err != nil {
+		return fmt.Errorf("failed to regenerate nginx config: %w", err)
+	}
+
+	return m.ReloadNginx()
+}
+
+// RenewCertificate renews a certificate for the specified server
+func (m *Manager) RenewCertificate(serverID string) error {
+	if m.certManager == nil {
+		return fmt.Errorf("certificate manager not initialized")
+	}
+
+	if err := m.certManager.RenewCertificate(serverID); err != nil {
+		return fmt.Errorf("failed to renew certificate for server %s: %w", serverID, err)
+	}
+
+	// Regenerate nginx configuration and reload
+	if err := m.GenerateNginxConfig(); err != nil {
+		return fmt.Errorf("failed to regenerate nginx config: %w", err)
+	}
+
+	return m.ReloadNginx()
+}
+
+// updateServerCertificatePaths updates a server's SSL configuration with the certificate paths from ACME
+func (m *Manager) updateServerCertificatePaths(serverID string) error {
+	certPath, keyPath, err := m.certManager.GetCertificatePaths(serverID)
+	if err != nil {
+		return err
+	}
+
+	// Find and update the server configuration
+	for i, server := range m.config.Servers {
+		if server.ID == serverID {
+			if m.config.Servers[i].SSL == nil {
+				m.config.Servers[i].SSL = &models.SSLConfig{}
+			}
+
+			// Update certificate paths
+			m.config.Servers[i].SSL.Certificate = certPath
+			m.config.Servers[i].SSL.PrivateKey = keyPath
+
+			// Save configuration
+			return m.SaveConfiguration()
+		}
+	}
+
+	return fmt.Errorf("server %s not found", serverID)
+}
+
+// CheckCertificateRenewal checks which certificates need renewal
+func (m *Manager) CheckCertificateRenewal() (map[string]bool, error) {
+	if m.certManager == nil {
+		return nil, fmt.Errorf("certificate manager not initialized")
+	}
+
+	return m.certManager.CheckRenewal(), nil
+}
+
+// ListManagedCertificates returns information about all managed certificates
+func (m *Manager) ListManagedCertificates() ([]*acme.CertificateInfo, error) {
+	if m.certManager == nil {
+		return nil, fmt.Errorf("certificate manager not initialized")
+	}
+
+	return m.certManager.ListCertificates()
+}
+
+// GetCertificateInfo returns information about a specific certificate
+func (m *Manager) GetCertificateInfo(serverID string) (*acme.CertificateInfo, error) {
+	if m.certManager == nil {
+		return nil, fmt.Errorf("certificate manager not initialized")
+	}
+
+	return m.certManager.GetCertificateInfo(serverID)
+}
+
+// EnableACMEForServer enables ACME certificate management for a specific server
+func (m *Manager) EnableACMEForServer(serverID string, acmeConfig *models.ACMEConfig) error {
+	// Find the server and update its SSL configuration
+	for i, server := range m.config.Servers {
+		if server.ID == serverID {
+			if m.config.Servers[i].SSL == nil {
+				m.config.Servers[i].SSL = &models.SSLConfig{
+					Enabled: true,
+				}
+			}
+
+			m.config.Servers[i].SSL.ACME = acmeConfig
+
+			// Save configuration
+			if err := m.SaveConfiguration(); err != nil {
+				return fmt.Errorf("failed to save configuration: %w", err)
+			}
+
+			// Add to certificate manager
+			if m.certManager != nil {
+				if err := m.certManager.AddACMEConfig(serverID, acmeConfig); err != nil {
+					return fmt.Errorf("failed to add ACME config to certificate manager: %w", err)
+				}
+			}
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("server %s not found", serverID)
+}
+
+// DisableACMEForServer disables ACME certificate management for a specific server
+func (m *Manager) DisableACMEForServer(serverID string) error {
+	// Find the server and update its SSL configuration
+	for i, server := range m.config.Servers {
+		if server.ID == serverID {
+			if m.config.Servers[i].SSL != nil {
+				m.config.Servers[i].SSL.ACME = nil
+			}
+
+			// Save configuration
+			if err := m.SaveConfiguration(); err != nil {
+				return fmt.Errorf("failed to save configuration: %w", err)
+			}
+
+			// Remove from certificate manager
+			if m.certManager != nil {
+				m.certManager.RemoveACMEConfig(serverID)
+			}
+
+			return nil
+		}
+	}
+
+	return fmt.Errorf("server %s not found", serverID)
+}
+
+// GetCertificateManager returns the certificate manager instance
+func (m *Manager) GetCertificateManager() *acme.CertificateManager {
+	return m.certManager
 }
 
 // TemplateInfo represents information about a template file

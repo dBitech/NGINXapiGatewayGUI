@@ -138,14 +138,63 @@ type CacheValidRule struct {
 	TTL         string `json:"ttl" yaml:"ttl"`                   // TTL for these status codes
 }
 
-// SSLConfig for SSL/TLS configuration
+// SSLConfig for SSL/TLS configuration with ACME support
 type SSLConfig struct {
-	Enabled     bool     `json:"enabled" yaml:"enabled"`
-	Certificate string   `json:"certificate" yaml:"certificate"`
-	PrivateKey  string   `json:"private_key" yaml:"private_key"`
-	Protocols   []string `json:"protocols" yaml:"protocols"`
-	Ciphers     string   `json:"ciphers" yaml:"ciphers"`
-	Redirect    bool     `json:"redirect" yaml:"redirect"` // redirect HTTP to HTTPS
+	Enabled bool `json:"enabled" yaml:"enabled"`
+
+	// Traditional certificate paths (for manual certificates)
+	Certificate string `json:"certificate,omitempty" yaml:"certificate,omitempty"`
+	PrivateKey  string `json:"private_key,omitempty" yaml:"private_key,omitempty"`
+
+	// ACME client integration for automatic certificates
+	ACME *ACMEConfig `json:"acme,omitempty" yaml:"acme,omitempty"`
+
+	// SSL/TLS settings
+	Protocols []string `json:"protocols" yaml:"protocols"`
+	Ciphers   string   `json:"ciphers" yaml:"ciphers"`
+	Redirect  bool     `json:"redirect" yaml:"redirect"` // redirect HTTP to HTTPS
+
+	// Advanced settings
+	HSTS *HSTSConfig `json:"hsts,omitempty" yaml:"hsts,omitempty"`
+	OCSP bool        `json:"ocsp_stapling" yaml:"ocsp_stapling"`
+}
+
+// ACMEConfig for automatic certificate management with Let's Encrypt and other ACME providers
+type ACMEConfig struct {
+	Enabled       bool     `json:"enabled" yaml:"enabled"`
+	Provider      string   `json:"provider" yaml:"provider"`             // "letsencrypt", "buypass", "zerossl"
+	Environment   string   `json:"environment" yaml:"environment"`       // "staging", "production"
+	Email         string   `json:"email" yaml:"email"`                   // Account email for ACME registration
+	Domains       []string `json:"domains" yaml:"domains"`               // Domain names for certificate
+	ChallengeType string   `json:"challenge_type" yaml:"challenge_type"` // "http-01", "dns-01", "tls-alpn-01"
+
+	// File paths for certificate storage
+	CertPath string `json:"cert_path" yaml:"cert_path"` // Where to store certificate
+	KeyPath  string `json:"key_path" yaml:"key_path"`   // Where to store private key
+
+	// Renewal settings
+	RenewDays     int    `json:"renew_days" yaml:"renew_days"`         // Days before expiry to renew
+	CheckInterval string `json:"check_interval" yaml:"check_interval"` // How often to check for renewal
+
+	// DNS challenge settings (if using DNS-01)
+	DNSProvider    string            `json:"dns_provider,omitempty" yaml:"dns_provider,omitempty"`
+	DNSCredentials map[string]string `json:"dns_credentials,omitempty" yaml:"dns_credentials,omitempty"`
+
+	// HTTP challenge settings (if using HTTP-01)
+	HTTPChallengePort int `json:"http_challenge_port,omitempty" yaml:"http_challenge_port,omitempty"`
+
+	// Advanced options
+	KeyType        string `json:"key_type,omitempty" yaml:"key_type,omitempty"` // "RSA2048", "RSA4096", "EC256", "EC384"
+	MustStaple     bool   `json:"must_staple,omitempty" yaml:"must_staple,omitempty"`
+	PreferredChain string `json:"preferred_chain,omitempty" yaml:"preferred_chain,omitempty"`
+}
+
+// HSTSConfig for HTTP Strict Transport Security
+type HSTSConfig struct {
+	Enabled           bool `json:"enabled" yaml:"enabled"`
+	MaxAge            int  `json:"max_age" yaml:"max_age"` // seconds
+	IncludeSubdomains bool `json:"include_subdomains" yaml:"include_subdomains"`
+	Preload           bool `json:"preload" yaml:"preload"`
 }
 
 // CORSConfig for Cross-Origin Resource Sharing
